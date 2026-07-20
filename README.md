@@ -7,6 +7,12 @@ Role definitions and the permission matrix are documented in [docs/RBAC.md](docs
 The matrix is implemented in `app/permissions.py` and enforced via FastAPI
 dependencies in `app/deps.py`, with a small demo API in `app/main.py`.
 
+## Customer module
+
+The Customers module is designed in [docs/CUSTOMER_MODULE.md](docs/CUSTOMER_MODULE.md)
+and implemented in `app/customers.py` (schema, validation, business rules,
+search/views), wired to HTTP routes in `app/main.py`.
+
 ```bash
 pip install -r requirements.txt
 pytest                        # run permission + API tests
