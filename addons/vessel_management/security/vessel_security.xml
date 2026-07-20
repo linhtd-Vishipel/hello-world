@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <record id="module_category_vessel_management" model="ir.module.category">
+            <field name="name">Vessel Management</field>
+            <field name="sequence">20</field>
+        </record>
+
+        <!-- Groups: mirror the roles in docs/RBAC.md down to a 4-tier hierarchy. -->
+
+        <record id="group_vessel_viewer" model="res.groups">
+            <field name="name">Viewer</field>
+            <field name="category_id" ref="module_category_vessel_management"/>
+            <field name="comment">Read-only access to vessels, equipment, and work orders in their own company. Maps to Sales and Accounting.</field>
+        </record>
+
+        <record id="group_vessel_technician" model="res.groups">
+            <field name="name">Technician</field>
+            <field name="category_id" ref="module_category_vessel_management"/>
+            <field name="implied_ids" eval="[(4, ref('group_vessel_viewer'))]"/>
+            <field name="comment">Read all vessels in their company; can only update equipment/work orders on vessels assigned to them.</field>
+        </record>
+
+        <record id="group_vessel_officer" model="res.groups">
+            <field name="name">Officer</field>
+            <field name="category_id" ref="module_category_vessel_management"/>
+            <field name="implied_ids" eval="[(4, ref('group_vessel_viewer'))]"/>
+            <field name="comment">Full CRUD on vessels, equipment, and work orders within their own company. Maps to Customer Service and Branch Manager.</field>
+        </record>
+
+        <record id="group_vessel_admin" model="res.groups">
+            <field name="name">Administrator</field>
+            <field name="category_id" ref="module_category_vessel_management"/>
+            <field name="implied_ids" eval="[(4, ref('group_vessel_officer'))]"/>
+            <field name="comment">Full CRUD across all companies the user has access to.</field>
+        </record>
+
+        <!-- Multi-company scoping: applies to everyone, including Administrators.
+             A user's visibility across companies is controlled the standard Odoo
+             way, via Settings > Users > Allowed Companies. -->
+
+        <record id="vessel_company_rule" model="ir.rule">
+            <field name="name">Vessel: multi-company</field>
+            <field name="model_id" ref="model_vessel_vessel"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', user.company_ids.ids)]</field>
+        </record>
+
+        <record id="vessel_equipment_company_rule" model="ir.rule">
+            <field name="name">Vessel Equipment: multi-company</field>
+            <field name="model_id" ref="model_vessel_equipment"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', user.company_ids.ids)]</field>
+        </record>
+
+        <record id="vessel_work_order_company_rule" model="ir.rule">
+            <field name="name">Vessel Work Order: multi-company</field>
+            <field name="model_id" ref="model_vessel_work_order"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', user.company_ids.ids)]</field>
+        </record>
+
+        <!-- Technicians: broad read, but writes restricted to records tied to
+             a vessel they are assigned to. Two rules per model so the read
+             grant (broad) and write grant (narrow) can differ. -->
+
+        <record id="vessel_technician_read_rule" model="ir.rule">
+            <field name="name">Vessel: technician read</field>
+            <field name="model_id" ref="model_vessel_vessel"/>
+            <field name="groups" eval="[(4, ref('group_vessel_technician'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="perm_read">1</field>
+            <field name="perm_write">0</field>
+            <field name="perm_create">0</field>
+            <field name="perm_unlink">0</field>
+        </record>
+
+        <record id="vessel_technician_write_rule" model="ir.rule">
+            <field name="name">Vessel: technician write own</field>
+            <field name="model_id" ref="model_vessel_vessel"/>
+            <field name="groups" eval="[(4, ref('group_vessel_technician'))]"/>
+            <field name="domain_force">[('technician_id', '=', user.id)]</field>
+            <field name="perm_read">0</field>
+            <field name="perm_write">1</field>
+            <field name="perm_create">0</field>
+            <field name="perm_unlink">0</field>
+        </record>
+
+        <record id="vessel_equipment_technician_read_rule" model="ir.rule">
+            <field name="name">Vessel Equipment: technician read</field>
+            <field name="model_id" ref="model_vessel_equipment"/>
+            <field name="groups" eval="[(4, ref('group_vessel_technician'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="perm_read">1</field>
+            <field name="perm_write">0</field>
+            <field name="perm_create">0</field>
+            <field name="perm_unlink">0</field>
+        </record>
+
+        <record id="vessel_equipment_technician_write_rule" model="ir.rule">
+            <field name="name">Vessel Equipment: technician write own vessel</field>
+            <field name="model_id" ref="model_vessel_equipment"/>
+            <field name="groups" eval="[(4, ref('group_vessel_technician'))]"/>
+            <field name="domain_force">[('vessel_id.technician_id', '=', user.id)]</field>
+            <field name="perm_read">0</field>
+            <field name="perm_write">1</field>
+            <field name="perm_create">1</field>
+            <field name="perm_unlink">0</field>
+        </record>
+
+        <record id="vessel_work_order_technician_read_rule" model="ir.rule">
+            <field name="name">Vessel Work Order: technician read</field>
+            <field name="model_id" ref="model_vessel_work_order"/>
+            <field name="groups" eval="[(4, ref('group_vessel_technician'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="perm_read">1</field>
+            <field name="perm_write">0</field>
+            <field name="perm_create">0</field>
+            <field name="perm_unlink">0</field>
+        </record>
+
+        <record id="vessel_work_order_technician_write_rule" model="ir.rule">
+            <field name="name">Vessel Work Order: technician write own</field>
+            <field name="model_id" ref="model_vessel_work_order"/>
+            <field name="groups" eval="[(4, ref('group_vessel_technician'))]"/>
+            <field name="domain_force">['|', ('technician_id', '=', user.id), ('vessel_id.technician_id', '=', user.id)]</field>
+            <field name="perm_read">0</field>
+            <field name="perm_write">1</field>
+            <field name="perm_create">1</field>
+            <field name="perm_unlink">0</field>
+        </record>
+
+    </data>
+</odoo>

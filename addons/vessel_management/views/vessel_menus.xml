@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <menuitem id="menu_vessel_root" name="Vessel Management" sequence="60"/>
+
+    <menuitem id="menu_vessel" name="Vessels" parent="menu_vessel_root" action="action_vessel" sequence="10"/>
+    <menuitem id="menu_vessel_equipment" name="Equipment" parent="menu_vessel_root" action="action_vessel_equipment" sequence="20"/>
+    <menuitem id="menu_vessel_work_order" name="Work Orders" parent="menu_vessel_root" action="action_vessel_work_order" sequence="30"/>
+
+</odoo>
