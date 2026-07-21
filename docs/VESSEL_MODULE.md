@@ -60,10 +60,22 @@ with a statusbar workflow and smart buttons for equipment/open work order
 counts), Equipment, Work Orders. Vessel form has tabs for Equipment, Work
 Orders, and Notes, plus chatter (mail thread) for activity history.
 
-## Known limitation
+## Verification
 
-This addon was written and statically checked (Python syntax, XML
-well-formedness, manifest data-file ordering) in an environment without an
-Odoo installation, so it has not been verified by actually loading/installing
-it against a running Odoo server. Install it in a real Odoo 17.0 instance and
-run `-i vessel_management --test-enable` (or equivalent) before relying on it.
+The addon has been installed and exercised against a real Odoo 17.0 +
+PostgreSQL 16 instance (`odoo-bin -i vessel_management`, then `-u
+vessel_management` to confirm the update path), which caught and fixed two
+real bugs the earlier static-only checks missed:
+
+- View archs used `<list>`/`"list"` (the `tree` → `list` rename shipped in
+  Odoo 18.0, not 17.0); reverted to `<tree>`/`"tree"` for 17.0 compatibility.
+- `vessel.work.order`'s chatter referenced `activity_ids`, which requires
+  `mail.activity.mixin`; the model only inherited `mail.thread`. Added the
+  mixin.
+
+Functional checks run via `odoo-bin shell` covered: IMO/MMSI/call-sign
+uniqueness constraints, the full state machine (including the
+decommission-blocked-by-open-work-orders guard and the terminal
+`decommissioned` state), the work order sequence, and `ir.rule` scoping (a
+Technician is blocked from writing to a vessel not assigned to them, can
+write once assigned, and can always read vessels in their own company).
