@@ -1,4 +1,6 @@
 # hello-world
+[![Tests](https://github.com/linhtd-Vishipel/hello-world/actions/workflows/tests.yml/badge.svg)](https://github.com/linhtd-Vishipel/hello-world/actions/workflows/tests.yml)
+
 Kho lưu trữ Dữ liệu MSI
 
 ## Role-based permissions
