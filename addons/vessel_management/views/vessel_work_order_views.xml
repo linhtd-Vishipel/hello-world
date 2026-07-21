@@ -5,14 +5,14 @@
         <field name="name">vessel.work.order.list</field>
         <field name="model">vessel.work.order</field>
         <field name="arch" type="xml">
-            <list string="Work Orders">
+            <tree string="Work Orders">
                 <field name="name"/>
                 <field name="vessel_id"/>
                 <field name="equipment_id"/>
                 <field name="technician_id"/>
                 <field name="date_open"/>
                 <field name="state" widget="badge" decoration-success="state == 'done'" decoration-info="state == 'in_progress'"/>
-            </list>
+            </tree>
         </field>
     </record>
 
@@ -73,7 +73,7 @@
     <record id="action_vessel_work_order" model="ir.actions.act_window">
         <field name="name">Work Orders</field>
         <field name="res_model">vessel.work.order</field>
-        <field name="view_mode">list,form</field>
+        <field name="view_mode">tree,form</field>
         <field name="search_view_id" ref="view_vessel_work_order_search"/>
         <field name="context">{'search_default_open': 1}</field>
     </record>

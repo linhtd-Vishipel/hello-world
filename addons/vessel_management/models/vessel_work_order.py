@@ -4,7 +4,7 @@ from odoo import api, fields, models
 class VesselWorkOrder(models.Model):
     _name = "vessel.work.order"
     _description = "Vessel Work Order"
-    _inherit = ["mail.thread"]
+    _inherit = ["mail.thread", "mail.activity.mixin"]
     _order = "date_open desc"
 
     name = fields.Char(string="Reference", default="New", copy=False, readonly=True)
