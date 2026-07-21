@@ -20,3 +20,13 @@ pip install -r requirements.txt
 pytest                        # run permission + API tests
 uvicorn app.main:app --reload # run the demo API
 ```
+
+## Vessel module (Odoo addon)
+
+The Vessel module is a separate Odoo 17.0 addon, designed in
+[docs/VESSEL_MODULE.md](docs/VESSEL_MODULE.md) and implemented in
+[`addons/vessel_management/`](addons/vessel_management/). It tracks vessels
+owned by customers (`res.partner`), their maritime communication equipment,
+and maintenance work orders, with its own security groups and multi-company
+scoping. It is independent of the FastAPI app above — install it into an
+Odoo 17.0 instance with `addons/` on the addons path.

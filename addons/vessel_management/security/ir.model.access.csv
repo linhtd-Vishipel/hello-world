@@ -1,0 +1,13 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_vessel_vessel_admin,vessel.vessel.admin,model_vessel_vessel,group_vessel_admin,1,1,1,1
+access_vessel_vessel_officer,vessel.vessel.officer,model_vessel_vessel,group_vessel_officer,1,1,1,1
+access_vessel_vessel_technician,vessel.vessel.technician,model_vessel_vessel,group_vessel_technician,1,1,0,0
+access_vessel_vessel_viewer,vessel.vessel.viewer,model_vessel_vessel,group_vessel_viewer,1,0,0,0
+access_vessel_equipment_admin,vessel.equipment.admin,model_vessel_equipment,group_vessel_admin,1,1,1,1
+access_vessel_equipment_officer,vessel.equipment.officer,model_vessel_equipment,group_vessel_officer,1,1,1,1
+access_vessel_equipment_technician,vessel.equipment.technician,model_vessel_equipment,group_vessel_technician,1,1,1,0
+access_vessel_equipment_viewer,vessel.equipment.viewer,model_vessel_equipment,group_vessel_viewer,1,0,0,0
+access_vessel_work_order_admin,vessel.work.order.admin,model_vessel_work_order,group_vessel_admin,1,1,1,1
+access_vessel_work_order_officer,vessel.work.order.officer,model_vessel_work_order,group_vessel_officer,1,1,1,1
+access_vessel_work_order_technician,vessel.work.order.technician,model_vessel_work_order,group_vessel_technician,1,1,1,0
+access_vessel_work_order_viewer,vessel.work.order.viewer,model_vessel_work_order,group_vessel_viewer,1,0,0,0

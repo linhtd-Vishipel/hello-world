@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_vessel_list" model="ir.ui.view">
+        <field name="name">vessel.vessel.list</field>
+        <field name="model">vessel.vessel</field>
+        <field name="arch" type="xml">
+            <list string="Vessels">
+                <field name="name"/>
+                <field name="imo_number"/>
+                <field name="vessel_type"/>
+                <field name="owner_id"/>
+                <field name="technician_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="state" widget="badge" decoration-success="state == 'active'"
+                       decoration-warning="state == 'out_of_service'" decoration-muted="state == 'decommissioned'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_vessel_form" model="ir.ui.view">
+        <field name="name">vessel.vessel.form</field>
+        <field name="model">vessel.vessel</field>
+        <field name="arch" type="xml">
+            <form string="Vessel">
+                <header>
+                    <button name="action_register" string="Register" type="object" invisible="state != 'draft'" class="oe_highlight"/>
+                    <button name="action_activate" string="Activate" type="object" invisible="state not in ('registered', 'out_of_service')" class="oe_highlight"/>
+                    <button name="action_set_out_of_service" string="Set Out of Service" type="object" invisible="state != 'active'"/>
+                    <button name="action_decommission" string="Decommission" type="object" invisible="state not in ('active', 'out_of_service')" confirm="Decommission this vessel? This cannot be undone."/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,registered,active,decommissioned"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="%(action_vessel_equipment)d" type="action" class="oe_stat_button" icon="fa-cogs"
+                                context="{'default_vessel_id': id, 'search_default_vessel_id': id}">
+                            <field name="equipment_count" widget="statinfo" string="Equipment"/>
+                        </button>
+                        <button name="%(action_vessel_work_order)d" type="action" class="oe_stat_button" icon="fa-wrench"
+                                context="{'default_vessel_id': id, 'search_default_vessel_id': id}">
+                            <field name="open_work_order_count" widget="statinfo" string="Open Work Orders"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name" placeholder="Vessel name"/></h1>
+                    </div>
+                    <group>
+                        <group string="Identity">
+                            <field name="imo_number"/>
+                            <field name="mmsi"/>
+                            <field name="call_sign"/>
+                            <field name="vessel_type"/>
+                            <field name="flag_state"/>
+                            <field name="home_port"/>
+                        </group>
+                        <group string="Specifications">
+                            <field name="gross_tonnage"/>
+                            <field name="length_overall"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Ownership">
+                            <field name="owner_id"/>
+                            <field name="operator_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                        <group string="Assignment">
+                            <field name="technician_id"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Equipment">
+                            <field name="equipment_ids">
+                                <list editable="bottom">
+                                    <field name="equipment_type"/>
+                                    <field name="serial_number"/>
+                                    <field name="install_date"/>
+                                    <field name="last_inspection_date"/>
+                                    <field name="next_inspection_date"/>
+                                    <field name="state"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Work Orders">
+                            <field name="work_order_ids">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="description"/>
+                                    <field name="technician_id"/>
+                                    <field name="date_open"/>
+                                    <field name="state"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Notes">
+                            <field name="note"/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <div class="oe_chatter">
+                    <field name="message_follower_ids"/>
+                    <field name="activity_ids"/>
+                    <field name="message_ids"/>
+                </div>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_vessel_kanban" model="ir.ui.view">
+        <field name="name">vessel.vessel.kanban</field>
+        <field name="model">vessel.vessel</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state">
+                <field name="name"/>
+                <field name="owner_id"/>
+                <field name="vessel_type"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="oe_kanban_card oe_kanban_global_click">
+                            <strong><field name="name"/></strong>
+                            <div><field name="owner_id"/></div>
+                            <div class="text-muted"><field name="vessel_type"/></div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="view_vessel_search" model="ir.ui.view">
+        <field name="name">vessel.vessel.search</field>
+        <field name="model">vessel.vessel</field>
+        <field name="arch" type="xml">
+            <search string="Vessels">
+                <field name="name"/>
+                <field name="imo_number"/>
+                <field name="mmsi"/>
+                <field name="call_sign"/>
+                <field name="owner_id"/>
+                <field name="technician_id"/>
+                <filter string="My Vessels" name="my_vessels" domain="[('technician_id', '=', uid)]"/>
+                <filter string="Active" name="active_state" domain="[('state', '=', 'active')]"/>
+                <separator/>
+                <filter string="Owner" name="group_owner" context="{'group_by': 'owner_id'}"/>
+                <filter string="Status" name="group_state" context="{'group_by': 'state'}"/>
+                <filter string="Vessel Type" name="group_type" context="{'group_by': 'vessel_type'}"/>
+                <filter string="Branch/Company" name="group_company" context="{'group_by': 'company_id'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_vessel" model="ir.actions.act_window">
+        <field name="name">Vessels</field>
+        <field name="res_model">vessel.vessel</field>
+        <field name="view_mode">list,kanban,form</field>
+        <field name="search_view_id" ref="view_vessel_search"/>
+        <field name="context">{'search_default_active_state': 1}</field>
+    </record>
+
+</odoo>
