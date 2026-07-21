@@ -212,3 +212,118 @@ def test_administrator_soft_deletes_customer_with_linked_service_order():
 def test_accounting_cannot_delete_customer():
     resp = client.delete("/customers/2", headers=_headers(1, "accounting"))
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+
+def _create_device(**overrides) -> dict:
+    payload = {
+        "customer_id": 1,
+        "branch_id": 1,
+        "category": "electronics",
+        "brand": "LG",
+        "model": "OLED55",
+        "serial_number": "LG-OLED55-777",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_customer_service_can_create_device():
+    resp = client.post("/devices", json=_create_device(), headers=_headers(1, "customer_service"))
+    assert resp.status_code == 200
+    assert resp.json()["device"]["brand"] == "LG"
+
+
+def test_sales_cannot_create_device():
+    resp = client.post("/devices", json=_create_device(serial_number="LG-OLED55-778"), headers=_headers(1, "sales"))
+    assert resp.status_code == 403
+
+
+def test_sales_can_read_devices():
+    resp = client.get("/devices", headers=_headers(1, "sales"))
+    assert resp.status_code == 200
+
+
+def test_branch_manager_can_read_own_branch_device():
+    resp = client.get("/devices/1", headers=_headers(1, "branch_manager", branch_id=1))
+    assert resp.status_code == 200
+    assert resp.json()["device"]["id"] == 1
+
+
+def test_branch_manager_cannot_read_other_branch_device():
+    resp = client.get("/devices/1", headers=_headers(1, "branch_manager", branch_id=2))
+    assert resp.status_code == 403
+
+
+def test_device_detail_includes_linked_service_orders():
+    resp = client.get("/devices/1", headers=_headers(1, "administrator"))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [o["id"] for o in body["service_orders"]] == [1]
+    assert body["audit_log"] == []
+
+
+def test_technician_lists_only_assigned_devices():
+    resp = client.get("/devices", headers=_headers(10, "technician"))
+    assert resp.status_code == 200
+    assert all(d["assigned_to_id"] == 10 for d in resp.json())
+
+
+def test_my_devices_view():
+    resp = client.get("/devices/mine", headers=_headers(10, "technician"))
+    assert resp.status_code == 200
+    assert all(d["assigned_to_id"] == 10 for d in resp.json())
+
+
+def test_technician_can_update_status_of_assigned_device():
+    resp = client.post(
+        "/devices/3/status",
+        json={"status": "under_repair"},
+        headers=_headers(10, "technician"),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "under_repair"
+
+
+def test_technician_cannot_update_status_of_unassigned_device():
+    resp = client.post(
+        "/devices/1/status",
+        json={"status": "under_repair"},
+        headers=_headers(99, "technician"),
+    )
+    assert resp.status_code == 403
+
+
+def test_sales_cannot_update_device():
+    resp = client.put("/devices/1", json={"model": "New Model"}, headers=_headers(1, "sales"))
+    assert resp.status_code == 403
+
+
+def test_administrator_hard_deletes_device_with_no_linked_records():
+    resp = client.post(
+        "/devices",
+        json=_create_device(serial_number="LG-OLED55-999"),
+        headers=_headers(1, "administrator"),
+    )
+    new_id = resp.json()["device"]["id"]
+
+    resp = client.delete(f"/devices/{new_id}", headers=_headers(1, "administrator"))
+    assert resp.status_code == 200
+    assert resp.json()["hard_deleted"] is True
+
+    resp = client.get(f"/devices/{new_id}", headers=_headers(1, "administrator"))
+    assert resp.status_code == 404
+
+
+def test_administrator_soft_deletes_device_with_linked_service_order():
+    resp = client.delete("/devices/1", headers=_headers(1, "administrator"))
+    assert resp.status_code == 200
+    assert resp.json()["hard_deleted"] is False
+
+    resp = client.get("/devices/1", headers=_headers(1, "administrator"))
+    assert resp.status_code == 200
+    assert resp.json()["device"]["status"] == "retired"

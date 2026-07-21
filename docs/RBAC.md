@@ -18,6 +18,7 @@ This document defines the user roles and their permissions for the system.
 - **User & Role Management** — create/edit users, assign roles, configure permissions
 - **System Settings** — global configuration, integrations, branch setup
 - **Customers** — customer records and contact info
+- **Devices** — customer-owned equipment tracked for service and warranty
 - **Sales (Quotes / Orders)** — quotes, sales orders, pricing
 - **Service / Work Orders** — technician assignments, job status, service history
 - **Inventory / Products** — stock levels, parts, product catalog
@@ -34,6 +35,7 @@ Legend: **C** = Create, **R** = Read, **U** = Update, **D** = Delete, **—** = 
 | User & Role Management | CRUD | — | — | — | — | R (own branch staff) |
 | System Settings | CRUD | — | — | — | — | R |
 | Customers | CRUD | CRUD | R (assigned) | CRUD | R | CRUD (own branch) |
+| Devices | CRUD | R | RU (assigned) | CRU | R | CRUD (own branch) |
 | Sales (Quotes / Orders) | CRUD | CRUD (own) | — | R | R | CRUD (own branch) |
 | Service / Work Orders | CRUD | R | RU (assigned) | CRU | R | CRUD (own branch) |
 | Inventory / Products | CRUD | R | R | R | R | RU (own branch) |
@@ -51,31 +53,32 @@ Legend: **C** = Create, **R** = Read, **U** = Update, **D** = Delete, **—** = 
 ### Sales
 - Creates and manages their own quotes and sales orders.
 - Creates and manages customer records.
-- Read-only access to inventory to check stock availability.
+- Read-only access to devices (to check model/warranty when quoting) and inventory to check stock availability.
 - Read-only access to their own sales reports.
 - No access to invoices/payments beyond viewing their own orders' billing status.
 - No access to service/work orders or accounting functions.
 
 ### Technician
 - Views work orders assigned to them; updates status, notes, and completion details.
-- Read-only access to customer info relevant to assigned jobs.
+- Views and updates devices assigned to them (service status, notes); read-only on unassigned devices' customer info relevant to assigned jobs.
 - Read-only access to inventory/parts needed for jobs.
 - No access to sales, accounting, or customer management outside assigned tickets.
 
 ### Customer Service
 - Creates and manages customer records and support tickets.
+- Registers and updates customer devices (model, serial number, warranty); cannot delete device records.
 - Creates/updates service requests on behalf of customers (routes to Technician).
 - Read-only access to sales orders and service history for support context.
 - No access to accounting, inventory management, or user administration.
 
 ### Accounting
 - Full CRUD over invoices and payments.
-- Read-only access to sales orders, service orders, and customer data for billing context.
+- Read-only access to sales orders, service orders, devices, and customer data for billing and warranty-claim context.
 - Access to financial reports across all branches.
 - No access to service/work order execution or user management.
 
 ### Branch Manager
-- Full CRUD over sales, customers, and service/work orders within their own branch.
+- Full CRUD over sales, customers, devices, and service/work orders within their own branch.
 - Read/update access to branch-level inventory and settings.
 - Read-only access to their branch's financial reports.
 - Read-only visibility into their branch's staff (cannot create/delete user accounts — that remains an Administrator function).

@@ -13,6 +13,13 @@ The Customers module is designed in [docs/CUSTOMER_MODULE.md](docs/CUSTOMER_MODU
 and implemented in `app/customers.py` (schema, validation, business rules,
 search/views), wired to HTTP routes in `app/main.py`.
 
+## Device module
+
+The Devices module is designed in [docs/DEVICE_MODULE.md](docs/DEVICE_MODULE.md)
+and implemented in `app/devices.py` (schema, validation, business rules,
+search/views), wired to HTTP routes in `app/main.py`. Devices track
+customer-owned equipment for service history and warranty.
+
 ```bash
 pip install -r requirements.txt
 pytest                        # run permission + API tests

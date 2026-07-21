@@ -33,6 +33,21 @@ from app.customers import search_customers
 from app.customers import transfer_branch as transfer_customer_record
 from app.customers import update_customer as update_customer_record
 from app.deps import get_current_user, require_object_access, require_permission
+from app.devices import AUDIT_LOG as DEVICE_AUDIT_LOG
+from app.devices import DeviceCategory, DeviceCreate, DeviceStatus, DeviceUpdate
+from app.devices import add_note as add_device_note_record
+from app.devices import change_status as change_device_status_record
+from app.devices import create_device as create_device_record
+from app.devices import delete_device as delete_device_record
+from app.devices import get_or_404 as get_device_or_404
+from app.devices import reassign as reassign_device_record
+from app.devices import search_devices
+from app.devices import transfer_branch as transfer_device_record
+from app.devices import update_device as update_device_record
+from app.devices import AssignRequest as DeviceAssignRequest
+from app.devices import NoteCreate as DeviceNoteCreate
+from app.devices import StatusChangeRequest as DeviceStatusChangeRequest
+from app.devices import TransferRequest as DeviceTransferRequest
 from app.permissions import CurrentUser, check_access, has_permission
 from app.roles import Action, Module, Role
 
@@ -46,11 +61,12 @@ class ServiceOrder:
     branch_id: int
     assigned_to_id: Optional[int] = None
     customer_id: Optional[int] = None
+    device_id: Optional[int] = None
 
 
 SERVICE_ORDERS = {
-    1: ServiceOrder(id=1, description="Fix printer", branch_id=1, assigned_to_id=10, customer_id=1),
-    2: ServiceOrder(id=2, description="Install router", branch_id=2, assigned_to_id=20, customer_id=2),
+    1: ServiceOrder(id=1, description="Fix printer", branch_id=1, assigned_to_id=10, customer_id=1, device_id=1),
+    2: ServiceOrder(id=2, description="Install router", branch_id=2, assigned_to_id=20, customer_id=2, device_id=2),
 }
 
 
@@ -186,6 +202,116 @@ def delete_customer(customer_id: int, user: CurrentUser = Depends(get_current_us
     require_object_access(user, Module.CUSTOMERS, Action.DELETE, customer)
     linked = any(o.customer_id == customer_id for o in SERVICE_ORDERS.values())
     return delete_customer_record(customer, user, has_linked_records=linked)
+
+
+# ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+
+@app.post("/devices")
+def create_device(
+    payload: DeviceCreate,
+    user: CurrentUser = Depends(require_permission(Module.DEVICES, Action.CREATE)),
+):
+    device = create_device_record(payload, user)
+    return {"device": device}
+
+
+@app.get("/devices")
+def list_devices(
+    user: CurrentUser = Depends(require_permission(Module.DEVICES, Action.READ)),
+    keyword: Optional[str] = None,
+    customer_id: Optional[int] = None,
+    branch_id: Optional[int] = None,
+    category: Optional[DeviceCategory] = None,
+    status: Optional[DeviceStatus] = None,
+    assigned: Optional[str] = None,
+    under_warranty: Optional[bool] = None,
+    created_from: Optional[date] = None,
+    created_to: Optional[date] = None,
+    include_archived: bool = False,
+):
+    scope = has_permission(user.role, Module.DEVICES, Action.READ)
+    return search_devices(
+        user,
+        scope,
+        keyword=keyword,
+        customer_id=customer_id,
+        branch_id=branch_id,
+        category=category,
+        status_filter=status,
+        assigned=assigned,
+        under_warranty=under_warranty,
+        created_from=created_from,
+        created_to=created_to,
+        include_archived=include_archived,
+    )
+
+
+@app.get("/devices/mine")
+def list_my_devices(user: CurrentUser = Depends(require_permission(Module.DEVICES, Action.READ))):
+    scope = has_permission(user.role, Module.DEVICES, Action.READ)
+    return search_devices(user, scope, assigned="me")
+
+
+@app.get("/devices/{device_id}")
+def get_device(device_id: int, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.READ, device)
+    service_orders = [
+        o
+        for o in SERVICE_ORDERS.values()
+        if o.device_id == device_id and check_access(user, Module.SERVICE_ORDERS, Action.READ, o)
+    ]
+    return {
+        "device": device,
+        "service_orders": service_orders,
+        "audit_log": DEVICE_AUDIT_LOG.get(device_id, []),
+    }
+
+
+@app.put("/devices/{device_id}")
+def update_device(device_id: int, payload: DeviceUpdate, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.UPDATE, device)
+    return update_device_record(device, payload, user)
+
+
+@app.post("/devices/{device_id}/status")
+def change_device_status(device_id: int, payload: DeviceStatusChangeRequest, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.UPDATE, device)
+    return change_device_status_record(device, payload.status, user)
+
+
+@app.post("/devices/{device_id}/transfer")
+def transfer_device(device_id: int, payload: DeviceTransferRequest, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.UPDATE, device)
+    return transfer_device_record(device, payload.branch_id, user)
+
+
+@app.post("/devices/{device_id}/assign")
+def assign_device(device_id: int, payload: DeviceAssignRequest, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.UPDATE, device)
+    return reassign_device_record(device, payload.assigned_to_id, user)
+
+
+@app.post("/devices/{device_id}/notes")
+def add_device_note(device_id: int, payload: DeviceNoteCreate, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.UPDATE, device)
+    return add_device_note_record(device, payload.text, user)
+
+
+@app.delete("/devices/{device_id}")
+def delete_device(device_id: int, user: CurrentUser = Depends(get_current_user)):
+    device = get_device_or_404(device_id)
+    require_object_access(user, Module.DEVICES, Action.DELETE, device)
+    linked = any(o.device_id == device_id for o in SERVICE_ORDERS.values())
+    return delete_device_record(device, user, has_linked_records=linked)
 
 
 # ---------------------------------------------------------------------------

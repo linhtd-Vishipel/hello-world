@@ -29,6 +29,7 @@ PERMISSIONS: PermissionTable = {
     Role.ADMINISTRATOR: {module: _all(*_CRUD) for module in Module},
     Role.SALES: {
         Module.CUSTOMERS: _all(*_CRUD),
+        Module.DEVICES: _all(Action.READ),
         Module.SALES_ORDERS: _scoped(Scope.OWN, *_CRUD),
         Module.SERVICE_ORDERS: _all(Action.READ),
         Module.INVENTORY: _all(Action.READ),
@@ -38,6 +39,7 @@ PERMISSIONS: PermissionTable = {
     },
     Role.TECHNICIAN: {
         Module.CUSTOMERS: _scoped(Scope.ASSIGNED, Action.READ),
+        Module.DEVICES: _scoped(Scope.ASSIGNED, Action.READ, Action.UPDATE),
         Module.SERVICE_ORDERS: _scoped(Scope.ASSIGNED, Action.READ, Action.UPDATE),
         Module.INVENTORY: _all(Action.READ),
         Module.REPORTS: _scoped(Scope.OWN, Action.READ),
@@ -45,6 +47,7 @@ PERMISSIONS: PermissionTable = {
     },
     Role.CUSTOMER_SERVICE: {
         Module.CUSTOMERS: _all(*_CRUD),
+        Module.DEVICES: _all(Action.CREATE, Action.READ, Action.UPDATE),
         Module.SERVICE_ORDERS: _all(Action.CREATE, Action.READ, Action.UPDATE),
         Module.SALES_ORDERS: _all(Action.READ),
         Module.INVENTORY: _all(Action.READ),
@@ -54,6 +57,7 @@ PERMISSIONS: PermissionTable = {
     },
     Role.ACCOUNTING: {
         Module.CUSTOMERS: _all(Action.READ),
+        Module.DEVICES: _all(Action.READ),
         Module.SALES_ORDERS: _all(Action.READ),
         Module.SERVICE_ORDERS: _all(Action.READ),
         Module.INVENTORY: _all(Action.READ),
@@ -65,6 +69,7 @@ PERMISSIONS: PermissionTable = {
         Module.USERS: _scoped(Scope.OWN_BRANCH, Action.READ),
         Module.SETTINGS: _all(Action.READ),
         Module.CUSTOMERS: _scoped(Scope.OWN_BRANCH, *_CRUD),
+        Module.DEVICES: _scoped(Scope.OWN_BRANCH, *_CRUD),
         Module.SALES_ORDERS: _scoped(Scope.OWN_BRANCH, *_CRUD),
         Module.SERVICE_ORDERS: _scoped(Scope.OWN_BRANCH, *_CRUD),
         Module.INVENTORY: _scoped(Scope.OWN_BRANCH, Action.READ, Action.UPDATE),

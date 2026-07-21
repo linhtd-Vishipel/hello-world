@@ -14,6 +14,7 @@ class Module(str, Enum):
     USERS = "users"
     SETTINGS = "settings"
     CUSTOMERS = "customers"
+    DEVICES = "devices"
     SALES_ORDERS = "sales_orders"
     SERVICE_ORDERS = "service_orders"
     INVENTORY = "inventory"
