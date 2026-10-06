@@ -30,3 +30,13 @@ owned by customers (`res.partner`), their maritime communication equipment,
 and maintenance work orders, with its own security groups and multi-company
 scoping. It is independent of the FastAPI app above — install it into an
 Odoo 17.0 instance with `addons/` on the addons path.
+
+## Excel Dashboard
+
+Web app cho nhân viên tải file Excel/CSV lên và tự động tạo dashboard (KPI, xu
+hướng, cơ cấu, phân bố, bảng chi tiết, biểu đồ tự thêm). Xem
+[docs/EXCEL_DASHBOARD.md](docs/EXCEL_DASHBOARD.md).
+
+```bash
+uvicorn excel_dashboard.main:app --host 0.0.0.0 --port 8000
+```

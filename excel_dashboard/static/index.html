@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Excel Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
+      <span>Excel Dashboard</span>
+    </div>
+    <button id="themeToggle" class="btn ghost" type="button" title="Đổi giao diện sáng/tối">Giao diện</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="card">
+        <h2>Tải file lên</h2>
+        <form id="uploadForm">
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" name="file" accept=".xlsx,.xlsm,.xls,.csv" hidden>
+            <span id="dropText">Kéo thả file Excel vào đây<br><small>hoặc bấm để chọn (.xlsx, .xls, .csv)</small></span>
+          </label>
+          <label class="field">Tên báo cáo
+            <input type="text" id="titleInput" maxlength="200" placeholder="Mặc định: tên file">
+          </label>
+          <label class="field">Người tải lên
+            <input type="text" id="uploaderInput" maxlength="100" placeholder="Họ tên nhân viên">
+          </label>
+          <button class="btn primary" type="submit" id="uploadBtn" disabled>Tải lên &amp; tạo dashboard</button>
+          <p class="msg" id="uploadMsg" role="status"></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="row-between">
+          <h2>Bộ dữ liệu</h2>
+          <span class="muted" id="datasetCount"></span>
+        </div>
+        <input type="search" id="datasetSearch" placeholder="Tìm theo tên, người tải…">
+        <ul class="dataset-list" id="datasetList"></ul>
+      </section>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="empty" id="emptyState">
+        <h1>Chưa chọn bộ dữ liệu</h1>
+        <p>Tải lên một file Excel bất kỳ. Hệ thống tự nhận diện cột số, cột ngày, cột phân loại và dựng dashboard tương ứng.</p>
+      </div>
+
+      <div id="dashboard" hidden>
+        <div class="dash-head">
+          <div>
+            <h1 id="dsTitle"></h1>
+            <p class="muted" id="dsMeta"></p>
+          </div>
+          <div class="actions">
+            <a class="btn ghost" id="downloadBtn" href="#">Tải file gốc</a>
+            <button class="btn ghost" id="printBtn" type="button">In / PDF</button>
+            <button class="btn danger" id="deleteBtn" type="button">Xoá</button>
+          </div>
+        </div>
+
+        <nav class="tabs" id="sheetTabs" aria-label="Sheet"></nav>
+        <p class="notice" id="sheetNotice" hidden></p>
+
+        <div class="filters" id="filters"></div>
+
+        <section class="kpis" id="kpis"></section>
+
+        <section class="grid" id="charts"></section>
+
+        <section class="card builder" id="builder">
+          <h2>Thêm biểu đồ</h2>
+          <form id="builderForm" class="builder-form">
+            <label class="field">Loại
+              <select id="bType">
+                <option value="bar">Cột</option>
+                <option value="hbar">Thanh ngang</option>
+                <option value="line">Đường</option>
+                <option value="doughnut">Tròn (tỷ trọng)</option>
+              </select>
+            </label>
+            <label class="field">Nhóm theo
+              <select id="bDim"></select>
+            </label>
+            <label class="field" id="bGrainWrap" hidden>Theo
+              <select id="bGrain">
+                <option value="day">Ngày</option>
+                <option value="month" selected>Tháng</option>
+                <option value="quarter">Quý</option>
+                <option value="year">Năm</option>
+              </select>
+            </label>
+            <label class="field">Chỉ số
+              <select id="bMeasure"></select>
+            </label>
+            <label class="field">Phép tính
+              <select id="bAgg">
+                <option value="sum">Tổng</option>
+                <option value="avg">Trung bình</option>
+                <option value="count">Đếm</option>
+                <option value="min">Nhỏ nhất</option>
+                <option value="max">Lớn nhất</option>
+              </select>
+            </label>
+            <label class="field grow">Tiêu đề
+              <input type="text" id="bTitle" maxlength="200" placeholder="Tự đặt nếu để trống">
+            </label>
+            <button class="btn primary" type="submit">Thêm</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Cấu trúc dữ liệu</h2>
+          <div class="table-wrap"><table class="table" id="profileTable"></table></div>
+        </section>
+
+        <section class="card">
+          <div class="row-between">
+            <h2>Dữ liệu chi tiết</h2>
+            <input type="search" id="tableSearch" placeholder="Tìm trong bảng…">
+          </div>
+          <div class="table-wrap"><table class="table" id="dataTable"></table></div>
+          <div class="pager" id="pager"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="tooltip" id="toast" role="alert" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
