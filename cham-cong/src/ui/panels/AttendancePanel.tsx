@@ -9,7 +9,7 @@ import { exportAttendanceXlsx, exportFileName } from '../../excel/export';
 import type { TabId } from '../App';
 import { Badge, Button, Card, EmptyState, Input, Modal, Select, useDialog, useToast } from '../components/ui';
 import { useActions, useApp } from '../context';
-import { downloadBytes, downloadJson, stamp, XLSX_MIME } from '../download';
+import { downloadBytes, downloadJson, isArtifactHost, stamp, XLSX_MIME } from '../download';
 import { ImportAttendanceDialog } from './ImportAttendanceDialog';
 
 interface Pos { r: number; c: number }
@@ -54,7 +54,7 @@ export function AttendancePanel({ onNavigate }: { onNavigate: (t: TabId) => void
     if (!sheet) return;
     try {
       const bytes = await exportAttendanceXlsx({ unit, sheet, employees, codes: allCodes });
-      downloadBytes(exportFileName(unit, year, month), bytes, XLSX_MIME);
+      if (!(await downloadBytes(exportFileName(unit, year, month), bytes, XLSX_MIME))) return;
       toast(`Đã xuất ${exportFileName(unit, year, month)}`, 'success');
     } catch (e) {
       toast(`Lỗi xuất Excel: ${(e as Error).message}`, 'error');
@@ -64,7 +64,11 @@ export function AttendancePanel({ onNavigate }: { onNavigate: (t: TabId) => void
   const backup = async () => {
     const r = await a.exportBackup('unit');
     if (!r.ok) return toast(r.message!, 'error');
-    downloadJson(`SaoLuu_${unit.code}_${stamp()}.json`, r.data);
+    try {
+      if (!(await downloadJson(`SaoLuu_${unit.code}_${stamp()}.json`, r.data))) return;
+    } catch (e) {
+      return toast((e as Error).message, 'error');
+    }
     await a.markBackedUp('unit');
     toast('Đã tải file sao lưu đơn vị về máy. Hãy cất giữ file ở nơi an toàn.', 'success');
   };
@@ -117,7 +121,7 @@ export function AttendancePanel({ onNavigate }: { onNavigate: (t: TabId) => void
         <Button onClick={async () => { const r = await a.saveNow(); toast(r.ok ? 'Tất cả thay đổi đã được lưu trên thiết bị này.' : r.message!, r.ok ? 'success' : 'error'); }}>Lưu</Button>
         <Button disabled={!sheet || sheet.locked || !a.can('data.import')} onClick={() => setImportOpen(true)}>Nhập Excel</Button>
         <Button disabled={!sheet || !a.can('export')} onClick={exportExcel}>Xuất Excel</Button>
-        <Button disabled={!sheet} onClick={() => window.print()}>In</Button>
+        {!isArtifactHost() && <Button disabled={!sheet} onClick={() => window.print()}>In</Button>}
         <Button disabled={!a.can('data.backup')} onClick={backup}>Sao lưu</Button>
         <Button onClick={() => onNavigate('du_lieu')}>Phục hồi</Button>
         {sheet && (a.can(sheet.locked ? 'sheet.unlock' : 'sheet.lock')) && (

@@ -32,7 +32,11 @@ export function DataPanel() {
   const download = async (scope: 'all' | 'unit') => {
     const r = await a.exportBackup(scope);
     if (!r.ok) return toast(r.message!, 'error');
-    downloadJson(`SaoLuu_${scope === 'all' ? 'ToanBo' : unit?.code}_${stamp()}.json`, r.data);
+    try {
+      if (!(await downloadJson(`SaoLuu_${scope === 'all' ? 'ToanBo' : unit?.code}_${stamp()}.json`, r.data))) return;
+    } catch (e) {
+      return toast((e as Error).message, 'error');
+    }
     await a.markBackedUp(scope);
     toast('Đã tải file sao lưu về máy. Lưu file ở ổ đĩa/thiết bị khác để phòng mất dữ liệu.', 'success');
   };
