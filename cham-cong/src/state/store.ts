@@ -21,6 +21,9 @@ import { newUnit, validateUnit } from '../domain/unit';
 import { normKey, nowIso, uid } from '../domain/util';
 import type { AttendanceImportPlan, EmployeeImportPlan } from '../excel/import';
 import type { Repo } from '../storage/db';
+import { defaultShiftConfig } from '../domain/roster/config';
+import type { Roster, ShiftConfig } from '../domain/roster/types';
+import { createRosterActions } from './rosterActions';
 
 export interface Session {
   userId: string | null;
@@ -64,6 +67,11 @@ export interface AppState {
   undo: UndoItem[];
   auditTick: number;
   lastBackupAt?: string;
+  /** Module phân ca trực: cấu hình của đơn vị (null = chưa tải) và các lịch theo tháng. */
+  shiftConfig: ShiftConfig | null;
+  /** false = cấu hình mặc định chưa được lưu lần nào. */
+  shiftConfigSaved: boolean;
+  rosters: Roster[];
 }
 
 const MAX_UNDO = 50;
@@ -88,6 +96,9 @@ export function createAppStore(today = new Date()) {
     pendingWrites: 0,
     undo: [],
     auditTick: 0,
+    shiftConfig: null,
+    shiftConfigSaved: false,
+    rosters: [],
   }));
   const get = store.getState;
   const set = store.setState;
@@ -146,8 +157,13 @@ export function createAppStore(today = new Date()) {
 
   async function loadUnitData(unitId: string) {
     const r = repo();
-    const [employees, codes, sheets] = await Promise.all([r.listEmployees(unitId), r.listCodes(unitId), r.listSheets(unitId)]);
-    set({ unitId, employees: sortEmployees(employees), codes: codes.sort((a, b) => a.order - b.order), sheets, undo: [] });
+    const [employees, codes, sheets, cfg, rosters] = await Promise.all([
+      r.listEmployees(unitId), r.listCodes(unitId), r.listSheets(unitId), r.getShiftConfig(unitId), r.listRosters(unitId),
+    ]);
+    set({
+      unitId, employees: sortEmployees(employees), codes: codes.sort((a, b) => a.order - b.order), sheets, undo: [],
+      shiftConfig: cfg ?? defaultShiftConfig(unitId), shiftConfigSaved: !!cfg, rosters,
+    });
   }
 
   function accessibleUnits(units: Unit[], session: Session | null): Unit[] {
@@ -190,6 +206,11 @@ export function createAppStore(today = new Date()) {
         ? null
         : { userId: null, username: 'local', displayName: 'Quản trị cục bộ', role: 'admin', unitIds: [], open: true };
       set({ repo: r, units, users, session, lastBackupAt, ready: true });
+      // Lần đầu mở sau khi nâng cấp module phân ca: tạo điểm khôi phục toàn bộ dữ liệu cũ.
+      if (units.length && !(await r.getMeta<string>('upgradeSnapshotV2'))) {
+        await snapshot('Tự động trước khi dùng module Phân ca trực (nâng cấp dữ liệu v2)', 'all');
+        await r.setMeta('upgradeSnapshotV2', nowIso());
+      }
       const visible = accessibleUnits(units, session);
       const target = visible.find((u) => u.id === lastUnitId) ?? visible[0];
       if (target) await loadUnitData(target.id);
@@ -206,7 +227,7 @@ export function createAppStore(today = new Date()) {
       const visible = accessibleUnits(get().units, session);
       if (!visible.some((u) => u.id === get().unitId)) {
         if (visible[0]) await loadUnitData(visible[0].id);
-        else set({ unitId: null, employees: [], codes: [], sheets: [] });
+        else set({ unitId: null, employees: [], codes: [], sheets: [], shiftConfig: null, rosters: [] });
       }
       return ok();
     },
@@ -665,6 +686,9 @@ export function createAppStore(today = new Date()) {
           codes: backup.codes.filter((c) => c.unitId === target.id),
           sheets: backup.sheets.filter((s) => s.unitId === target.id),
           audit: backup.audit.filter((a) => a.unitId === target.id),
+          shiftConfigs: (backup.shiftConfigs ?? []).filter((c) => c.unitId === target.id),
+          rosters: (backup.rosters ?? []).filter((x) => x.unitId === target.id),
+          rosterVersions: (backup.rosterVersions ?? []).filter((x) => x.unitId === target.id),
         };
         const saved = await write(() => r.replaceUnit(unitBackup));
         if (!saved.ok) return saved;
@@ -675,7 +699,7 @@ export function createAppStore(today = new Date()) {
       const visible = accessibleUnits(units, get().session);
       const target = visible.find((u) => u.id === get().unitId) ?? visible[0];
       if (target) await loadUnitData(target.id);
-      else set({ unitId: null, employees: [], codes: [], sheets: [] });
+      else set({ unitId: null, employees: [], codes: [], sheets: [], shiftConfig: null, rosters: [] });
       return ok();
     },
 
@@ -779,7 +803,8 @@ export function createAppStore(today = new Date()) {
     monthKey: () => monthKey(get().year, get().month),
   };
 
-  return Object.assign(store, { actions });
+  const roster = createRosterActions({ get, set, repo, write, audit, snapshot, allowed, unit, who, editCells: (e, reason) => actions.editCells(e, reason) });
+  return Object.assign(store, { actions: Object.assign(actions, { roster }) });
 }
 
 function draftToEmployee(draft: EmployeeDraft, unitId: string, existing: Employee[]): Employee {

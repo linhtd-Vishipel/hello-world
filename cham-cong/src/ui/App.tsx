@@ -10,14 +10,16 @@ import { CodesPanel } from './panels/CodesPanel';
 import { DataPanel } from './panels/DataPanel';
 import { EmployeesPanel } from './panels/EmployeesPanel';
 import { HelpPanel } from './panels/HelpPanel';
+import { RosterPanel } from './panels/roster/RosterPanel';
 import { UnitSettingsPanel } from './panels/UnitSettingsPanel';
 import { UsersPanel } from './panels/UsersPanel';
 import { pickFile, readFileJson } from './download';
 
-export type TabId = 'cham_cong' | 'nhan_su' | 'ma_cong' | 'don_vi' | 'du_lieu' | 'nhat_ky' | 'nguoi_dung' | 'huong_dan';
+export type TabId = 'cham_cong' | 'phan_ca' | 'nhan_su' | 'ma_cong' | 'don_vi' | 'du_lieu' | 'nhat_ky' | 'nguoi_dung' | 'huong_dan';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'cham_cong', label: 'Bảng chấm công' },
+  { id: 'phan_ca', label: 'Phân ca trực' },
   { id: 'nhan_su', label: 'Nhân sự' },
   { id: 'ma_cong', label: 'Mã công' },
   { id: 'don_vi', label: 'Thiết lập đơn vị' },
@@ -142,6 +144,7 @@ function Shell() {
         ) : (
           <>
             {tab === 'cham_cong' && <AttendancePanel onNavigate={setTab} />}
+            {tab === 'phan_ca' && <RosterPanel onNavigate={setTab} />}
             {tab === 'nhan_su' && <EmployeesPanel />}
             {tab === 'ma_cong' && <CodesPanel />}
             {tab === 'don_vi' && <UnitSettingsPanel />}

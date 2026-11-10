@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { Roster, RosterVersion, ShiftConfig } from '../domain/roster/types';
 import type { AttendanceCode, AuditEntry, BackupFile, Employee, MonthSheet, Snapshot, Unit, User } from '../domain/types';
 
 interface ChamCongDB extends DBSchema {
@@ -10,12 +11,17 @@ interface ChamCongDB extends DBSchema {
   snapshots: { key: string; value: Snapshot };
   users: { key: string; value: User };
   meta: { key: string; value: { key: string; value: unknown } };
+  // Phiên bản 2: module phân ca trực
+  shiftConfigs: { key: string; value: ShiftConfig; indexes: { byUnit: string } };
+  rosters: { key: string; value: Roster; indexes: { byUnit: string } };
+  rosterVersions: { key: string; value: RosterVersion; indexes: { byUnit: string; byRoster: string } };
 }
 
 export const DB_NAME = 'cham-cong-dai-ttdh';
-const VERSION = 1;
+const VERSION = 2;
 
-const DATA_STORES = ['units', 'employees', 'codes', 'sheets', 'audit'] as const;
+const DATA_STORES = ['units', 'employees', 'codes', 'sheets', 'audit', 'shiftConfigs', 'rosters', 'rosterVersions'] as const;
+const UNIT_STORES = ['employees', 'codes', 'sheets', 'audit', 'shiftConfigs', 'rosters', 'rosterVersions'] as const;
 
 /**
  * Lớp truy cập dữ liệu. Mọi truy vấn nghiệp vụ đều theo unitId để
@@ -26,15 +32,25 @@ export class Repo {
 
   static async open(name = DB_NAME): Promise<Repo> {
     const db = await openDB<ChamCongDB>(name, VERSION, {
-      upgrade(db) {
-        db.createObjectStore('units', { keyPath: 'id' });
-        db.createObjectStore('employees', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
-        db.createObjectStore('codes', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
-        db.createObjectStore('sheets', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
-        db.createObjectStore('audit', { keyPath: 'id', autoIncrement: true }).createIndex('byUnit', 'unitId');
-        db.createObjectStore('snapshots', { keyPath: 'id' });
-        db.createObjectStore('users', { keyPath: 'id' });
-        db.createObjectStore('meta', { keyPath: 'key' });
+      // Nâng cấp chỉ THÊM kho mới, không đụng tới dữ liệu đã có.
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          db.createObjectStore('units', { keyPath: 'id' });
+          db.createObjectStore('employees', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
+          db.createObjectStore('codes', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
+          db.createObjectStore('sheets', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
+          db.createObjectStore('audit', { keyPath: 'id', autoIncrement: true }).createIndex('byUnit', 'unitId');
+          db.createObjectStore('snapshots', { keyPath: 'id' });
+          db.createObjectStore('users', { keyPath: 'id' });
+          db.createObjectStore('meta', { keyPath: 'key' });
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('shiftConfigs', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
+          db.createObjectStore('rosters', { keyPath: 'id' }).createIndex('byUnit', 'unitId');
+          const v = db.createObjectStore('rosterVersions', { keyPath: 'id' });
+          v.createIndex('byUnit', 'unitId');
+          v.createIndex('byRoster', 'rosterId');
+        }
       },
     });
     return new Repo(db);
@@ -129,6 +145,29 @@ export class Repo {
     await this.db.delete('users', id);
   }
 
+  // ----- Phân ca trực
+  getShiftConfig(unitId: string) {
+    return this.db.get('shiftConfigs', unitId);
+  }
+  async putShiftConfig(c: ShiftConfig) {
+    await this.db.put('shiftConfigs', c);
+  }
+  listRosters(unitId: string) {
+    return this.db.getAllFromIndex('rosters', 'byUnit', unitId);
+  }
+  async putRoster(r: Roster) {
+    await this.db.put('rosters', r);
+  }
+  async addRosterVersion(v: RosterVersion, keep = 30) {
+    await this.db.put('rosterVersions', v);
+    const all = (await this.db.getAllFromIndex('rosterVersions', 'byRoster', v.rosterId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    for (const old of all.slice(keep)) await this.db.delete('rosterVersions', old.id);
+  }
+  async listRosterVersions(rosterId: string) {
+    const all = await this.db.getAllFromIndex('rosterVersions', 'byRoster', rosterId);
+    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   async getMeta<T>(key: string): Promise<T | undefined> {
     return (await this.db.get('meta', key))?.value as T | undefined;
   }
@@ -153,6 +192,9 @@ export class Repo {
         codes: await this.listCodes(unitId),
         sheets: await this.listSheets(unitId),
         audit: await this.db.getAllFromIndex('audit', 'byUnit', unitId),
+        shiftConfigs: await this.db.getAllFromIndex('shiftConfigs', 'byUnit', unitId),
+        rosters: await this.listRosters(unitId),
+        rosterVersions: await this.db.getAllFromIndex('rosterVersions', 'byUnit', unitId),
       };
     }
     return {
@@ -166,6 +208,9 @@ export class Repo {
       sheets: await this.db.getAll('sheets'),
       audit: await this.db.getAll('audit'),
       users: await this.db.getAll('users'),
+      shiftConfigs: await this.db.getAll('shiftConfigs'),
+      rosters: await this.db.getAll('rosters'),
+      rosterVersions: await this.db.getAll('rosterVersions'),
     };
   }
 
@@ -182,6 +227,9 @@ export class Repo {
     for (const s of b.sheets) ops.push(tx.objectStore('sheets').put(s));
     for (const a of b.audit) ops.push(tx.objectStore('audit').put(a));
     if (b.users) for (const u of b.users) ops.push(tx.objectStore('users').put(u));
+    for (const c of b.shiftConfigs ?? []) ops.push(tx.objectStore('shiftConfigs').put(c));
+    for (const r of b.rosters ?? []) ops.push(tx.objectStore('rosters').put(r));
+    for (const v of b.rosterVersions ?? []) ops.push(tx.objectStore('rosterVersions').put(v));
     await Promise.all([...ops, tx.done]);
   }
 
@@ -189,11 +237,11 @@ export class Repo {
   async replaceUnit(b: BackupFile) {
     if (b.units.length !== 1) throw new Error('Bản sao lưu đơn vị phải chứa đúng 1 đơn vị.');
     const unitId = b.units[0].id;
-    const foreign = [...b.employees, ...b.codes, ...b.sheets].some((r) => r.unitId !== unitId);
+    const foreign = [...b.employees, ...b.codes, ...b.sheets, ...(b.shiftConfigs ?? []), ...(b.rosters ?? []), ...(b.rosterVersions ?? [])].some((r) => r.unitId !== unitId);
     if (foreign) throw new Error('Bản sao lưu chứa dữ liệu không thuộc đơn vị.');
     const tx = this.db.transaction(DATA_STORES, 'readwrite');
     const ops: Promise<unknown>[] = [];
-    for (const store of ['employees', 'codes', 'sheets', 'audit'] as const) {
+    for (const store of UNIT_STORES) {
       const idx = tx.objectStore(store).index('byUnit');
       let cur = await idx.openCursor(unitId);
       while (cur) {
@@ -205,6 +253,9 @@ export class Repo {
     for (const e of b.employees) ops.push(tx.objectStore('employees').put(e));
     for (const c of b.codes) ops.push(tx.objectStore('codes').put(c));
     for (const s of b.sheets) ops.push(tx.objectStore('sheets').put(s));
+    for (const c of b.shiftConfigs ?? []) ops.push(tx.objectStore('shiftConfigs').put(c));
+    for (const r of b.rosters ?? []) ops.push(tx.objectStore('rosters').put(r));
+    for (const v of b.rosterVersions ?? []) ops.push(tx.objectStore('rosterVersions').put(v));
     for (const a of b.audit) {
       const { id: _id, ...rest } = a;
       ops.push(tx.objectStore('audit').add(rest as AuditEntry));

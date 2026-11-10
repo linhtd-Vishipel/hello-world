@@ -126,13 +126,95 @@ Không cần sửa mã nguồn cho Đài mới.
 - Tài khoản có thể giới hạn theo đơn vị.
 - **Giới hạn quan trọng:** ở chế độ local, phân quyền và cách ly đơn vị chỉ có hiệu lực trên giao diện của máy đó (người có quyền truy cập máy vẫn đọc được IndexedDB). Khi nhiều người/nhiều Đài dùng chung dữ liệu qua mạng, cần bổ sung backend có xác thực, phân quyền và tách dữ liệu theo đơn vị ở máy chủ (xem mục 10).
 
+## 8b. Module PHÂN CA TRỰC
+
+Menu **Phân ca trực** gồm 3 phần: *Lập lịch & xem lịch*, *Nhân sự phân ca*, *Cấu hình ca & quy tắc*. Module dùng chung dữ liệu nhân sự, mã công, lịch ngày lễ và bảng chấm công của Dashboard (không tạo bản sao nhân sự).
+
+### Dữ liệu (IndexedDB phiên bản 2, chỉ thêm kho mới)
+
+| Kho | Nội dung |
+|---|---|
+| `shiftConfigs` | Theo đơn vị: vị trí công việc, danh mục ca (giờ, số giờ, ca đêm, **mã chấm công tương ứng**), nhu cầu số người theo ca/vị trí/loại ngày, quy tắc, hồ sơ phân ca từng nhân sự (khóa theo `Employee.id`) |
+| `rosters` | Lịch từng tháng: người tham gia, lượt xếp (ngày, ca, vị trí, người, xếp tay/tự động, ghi chú), ngày nghỉ đăng ký (mã lấy từ danh mục mã công), trạng thái nháp/đã chốt, thời điểm đồng bộ |
+| `rosterVersions` | Phiên bản lưu tự động trước mỗi lần lập lịch, điều chỉnh, chốt, mở lại, khôi phục (giữ 30 bản gần nhất mỗi tháng) |
+
+Lần đầu mở sau khi nâng cấp, ứng dụng tự tạo điểm khôi phục toàn bộ dữ liệu cũ ("Tự động trước khi dùng module Phân ca trực"). File sao lưu/phục hồi và sao lưu đơn vị đã bao gồm dữ liệu phân ca; file sao lưu cũ vẫn phục hồi được.
+
+### Quy tắc mặc định (sửa được trong Cấu hình)
+
+Lấy theo quy tắc đang áp dụng tại đài trực 24/7:
+- trần 26 công/tháng;
+- tối đa 6 ngày làm liên tiếp và 2 ca đêm liên tiếp;
+- nghỉ tối thiểu 8 giờ giữa hai ca;
+- sau ca đêm phải nghỉ 24 giờ mới nhận ca **trực canh**, nhưng vẫn được làm hành chính hôm sau;
+- khối hành chính nghỉ T7/CN/lễ, chỉ người được đánh dấu "luân phiên hành chính cuối tuần" mới được xếp xen kẽ khi thiếu người;
+- mỗi người tối đa 1 ca/ngày.
+
+Các tùy chọn khác:
+- **Giới hạn số ngày liên tiếp theo từng vị trí:** ví dụ đặt 2 cho vị trí khai thác để không ai làm 3 ca liên tiếp ở đó.
+- **Định mức công:** mặc định bằng số ngày làm việc hành chính của tháng.
+- **Ngưỡng chênh lệch công bằng.**
+- **Số tháng trước dùng để cân đối.**
+- **Ngày làm việc đặc biệt (làm bù).**
+
+Bộ luật Lao động quy định nghỉ ít nhất 12 giờ trước khi chuyển ca. Đơn vị cần xác nhận và đặt "Giờ nghỉ tối thiểu giữa hai ca" phù hợp quy chế.
+
+### Thuật toán lập lịch
+
+1. Nối trạng thái từ lịch tháng trước (chuỗi ngày làm, chuỗi đêm, giờ kết thúc ca cuối) và lấy số ca đêm/cuối tuần các tháng trước để cân đối.
+2. Ngày nghỉ đã đăng ký trong lịch và **mọi mã không phải mã ca đã nhập ở bảng chấm công** (P, Ô, CT, NL…) được coi là ngày nghỉ đã duyệt – không bao giờ xếp ca.
+3. Mỗi ngày, ghép người–vị trí bằng bài toán phân công chi phí nhỏ nhất (Hungarian): phủ tối đa vị trí trước, sau đó ưu tiên công bằng (số ngày, số đêm, cuối tuần so với định mức), nối khối 2 đêm, giữ người chính cho vị trí hành chính, dùng người vừa hết ca đêm cho vị trí hành chính, khối hành chính cuối tuần chỉ là phương án cuối.
+4. Chạy nhiều lần với hạt giống cố định (kết quả lặp lại được), chọn phương án ít thiếu người và chênh lệch nhỏ nhất.
+5. Không bao giờ xếp vi phạm quy tắc cứng. Vị trí không đủ người được để trống, kèm lý do từng người (đang nghỉ, chưa đủ giờ nghỉ, đủ trần công…).
+6. Ô xếp tay (dấu •) và ngày nghỉ được giữ khi lập lại.
+
+### Kiểm tra lịch (độc lập với thuật toán)
+
+**Lỗi** (chặn chốt lịch):
+- thiếu người;
+- trùng ca hoặc chồng giờ;
+- xếp vào ngày nghỉ;
+- ngoài thời gian làm việc;
+- không đủ điều kiện vị trí hoặc ca đêm;
+- không đủ giờ nghỉ, kể cả nối từ tháng trước;
+- vượt số ngày liên tiếp, số đêm liên tiếp hoặc số ngày liên tiếp tại vị trí;
+- vượt trần công.
+
+**Cảnh báo:**
+- xếp khối hành chính vào ngày nghỉ;
+- chênh lệch số ngày trực, ca đêm hoặc cuối tuần trong nhóm vượt ngưỡng;
+- thiếu hoặc thừa công so với định mức.
+
+### Đồng bộ chấm công và bảng lương
+
+- Chỉ đồng bộ lịch **đã chốt** vào bảng chấm công chưa khóa.
+- Mã công lấy từ ánh xạ ca → mã do quản trị viên chọn. Ca chưa gán mã thì chặn đồng bộ; ứng dụng không tự suy diễn mã.
+- Có bản xem trước từng ô, chia theo loại: ghi mới, cập nhật, xóa mã ca, giữ nguyên mã nghỉ, xung đột.
+- Ô đang có mã khác mã ca (nghỉ phép, chế độ, công tác…) **không bao giờ bị ghi đè**. Khi đổi lịch, chỉ những ô thực sự khác mới thay đổi.
+- Tạo điểm khôi phục trước khi ghi và ghi nhật ký.
+- Tổng công quy đổi được tính bởi bảng chấm công như trước.
+- File Excel lịch phân ca có trang "Tổng hợp công" (số ngày, ca, đêm, giờ, nghỉ có mã, định mức, chênh lệch, công quy đổi từ bảng chấm công) để chuyển cho bảng lương. Dashboard hiện **chưa có module bảng lương riêng**.
+
+### Xuất Excel và in
+
+File `Lich_phan_ca_[MaDonVi][YYYY][MM].xlsx` có 4 trang. Tất cả có đường viền, màu ca, tô màu cuối tuần/lễ, khối ký, khổ A4/A3 ngang, lặp dòng tiêu đề.
+
+| Trang | Nội dung |
+|---|---|
+| Lịch phân ca | Ngày × (vị trí, ca), ô thiếu người tô đỏ |
+| Theo nhân sự | Người × ngày, công thức `COUNTIF`/`SUM` đếm ca, giờ, ngày nghỉ, kèm dòng số người trực mỗi ngày |
+| Tổng hợp công | Số liệu chuyển cho bảng lương (xem mục trên) |
+| Vi phạm | Báo cáo các trường hợp vi phạm quy tắc phân ca |
+
+Nút **In trình ký** in bảng tháng từ trình duyệt (bị ẩn khi chạy trong trang Artifact).
+
 ## 9. Kiểm thử
 
 ```bash
 npm test
 ```
 
-29 kiểm thử trong `tests/`, bao phủ 20 trường hợp bắt buộc:
+41 kiểm thử trong `tests/`, bao phủ 20 trường hợp bắt buộc của Dashboard và các trường hợp của module Phân ca trực:
 
 | # | Trường hợp | Tệp |
 |---|---|---|
@@ -142,6 +224,7 @@ npm test
 | 10–11, 18–19 | Sửa mã một ngày, tổng hợp sau sửa, tháng khóa, phát hiện ô thiếu/mã sai | `sheet.test.ts` |
 | 12–14 | Nhập Excel hợp lệ, mã NV không tồn tại, xuất Excel và kiểm tra định dạng/in | `excel.test.ts` |
 | 15–17, 20 | Đóng/mở lại dữ liệu, sao lưu/phục hồi, chuyển đơn vị không lẫn dữ liệu, 500 nhân sự | `persistence.test.ts` |
+| Phân ca | Lập lịch tháng mới, thiếu nhân sự, nghỉ phép, cuối tuần/luân phiên hành chính, nối tháng trước, giới hạn vị trí, đổi ca/xếp tay/phiên bản, đồng bộ chấm công không ghi đè mã nghỉ, chặn chốt khi còn lỗi và phân quyền, xuất Excel, sao lưu và nâng cấp CSDL v1 → v2 | `roster.test.ts` |
 
 Kiểm thử xuất Excel mở lại file bằng ExcelJS để kiểm tra giá trị, công thức, kết quả, gộp ô, màu, viền, phông, khổ giấy, hướng, vùng in, dòng tiêu đề lặp và khối ký.
 
@@ -152,6 +235,7 @@ Kiểm thử xuất Excel mở lại file bằng ExcelJS để kiểm tra giá t
 - Nhập Excel đọc trang tính đầu tiên nhận diện được và giá trị kết quả của công thức; không giữ lại công thức của file nguồn.
 - Mỗi ô chứa một mã công (nửa ngày dùng mã riêng, ví dụ `X/2` với hệ số 0,5).
 - Lễ âm lịch cần khai báo thủ công hằng năm.
+- Phân ca: chưa nhập được lịch phân ca các tháng trước từ file Excel cũ; lịch sử dùng để cân đối chỉ tính từ các tháng lập trong ứng dụng. Thuật toán tối ưu theo từng ngày (có nối trạng thái và nhiều lần thử), không bảo đảm phương án tối ưu toàn cục cho cả tháng. Chưa có module bảng lương riêng (chỉ xuất dữ liệu công).
 
 ## 11. Cập nhật phiên bản
 

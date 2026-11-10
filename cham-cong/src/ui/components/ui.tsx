@@ -138,7 +138,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((text: string, kind: ToastKind = 'info') => {
     const id = ++idRef.current;
-    setToasts((t) => [...t, { id, text, kind }]);
+    setToasts((t) => [...t.slice(-2), { id, text, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 8000 : 4000);
   }, []);
 

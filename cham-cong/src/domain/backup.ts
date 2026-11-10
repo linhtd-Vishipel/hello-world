@@ -24,7 +24,7 @@ export function validateBackup(data: unknown): { backup?: BackupFile; preview: B
   }
   if (errors.length) return { preview: empty };
   const unitIds = new Set(b.units!.map((u) => u.id));
-  const orphan = [...b.employees!, ...b.codes!, ...b.sheets!].filter((r) => !unitIds.has(r.unitId));
+  const orphan = [...b.employees!, ...b.codes!, ...b.sheets!, ...(b.shiftConfigs ?? []), ...(b.rosters ?? [])].filter((r) => !unitIds.has(r.unitId));
   if (orphan.length) errors.push(`${orphan.length} bản ghi không thuộc đơn vị nào trong file.`);
   for (const s of b.sheets!) {
     if (s.id !== sheetId(s.unitId, s.year, s.month)) errors.push(`Bảng chấm công có khóa không hợp lệ: ${s.id}`);

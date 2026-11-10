@@ -181,7 +181,7 @@ export function EmployeesPanel() {
   );
 }
 
-function EmployeeForm({ draft, onClose }: { draft: EmployeeDraft; onClose: () => void }) {
+export function EmployeeForm({ draft, onClose }: { draft: EmployeeDraft; onClose: () => void }) {
   const a = useActions();
   const toast = useToast();
   const employees = useApp((s) => s.employees);

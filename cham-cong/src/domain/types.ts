@@ -1,3 +1,5 @@
+import type { Roster, RosterVersion, ShiftConfig } from './roster/types';
+
 // Mô hình dữ liệu dùng chung cho toàn ứng dụng.
 // Mọi bản ghi nghiệp vụ đều gắn unitId để tách dữ liệu theo Đài.
 
@@ -196,6 +198,10 @@ export interface BackupFile {
   sheets: MonthSheet[];
   audit: AuditEntry[];
   users?: User[];
+  /** Module phân ca trực (bản sao lưu cũ không có các trường này). */
+  shiftConfigs?: ShiftConfig[];
+  rosters?: Roster[];
+  rosterVersions?: RosterVersion[];
 }
 
 export interface Snapshot {

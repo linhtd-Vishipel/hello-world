@@ -39,6 +39,18 @@ const STEPS: { title: string; items: string[] }[] = [
     ],
   },
   {
+    title: '4b. Phân ca trực (quy trình 10 bước)',
+    items: [
+      'Lần đầu: thẻ "Phân ca trực" → "Cấu hình ca & quy tắc": khai báo vị trí công việc, ca trực (giờ, số giờ, ca đêm), GÁN MÃ CHẤM CÔNG cho từng ca từ danh mục mã công, nhu cầu số người theo ca/vị trí/loại ngày và các quy tắc (trần công, ngày liên tiếp, đêm liên tiếp, giờ nghỉ giữa ca, khối hành chính nghỉ cuối tuần...). Bấm Lưu.',
+      '"Nhân sự phân ca": thiết lập cho từng người loại công việc (trực ca / hành chính / kiêm nhiệm), nhóm trực, vị trí được đảm nhận, vị trí chính, không trực đêm, luân phiên hành chính cuối tuần, định mức/trần riêng.',
+      'Hằng tháng: chọn tháng → "Tạo lịch phân ca" → kiểm tra "Nhân sự tham gia" và ghi ngày nghỉ (bấm vào ô) → "Tự động lập lịch". Mã nghỉ đã nhập ở bảng chấm công được tự động tôn trọng.',
+      'Nếu thiếu người, hệ thống để trống vị trí và liệt kê lý do từng người không xếp được – không xếp sai quy tắc để lấp chỗ.',
+      'Xem bảng "Kết quả kiểm tra lịch"; bấm vào ô để xếp tay, đổi ca với người khác, bỏ ca hoặc ghi nghỉ. Ô xếp tay (dấu •) được giữ khi lập lại tự động. Bấm "Kiểm tra lại" sau khi chỉnh.',
+      '"Chốt lịch" khi không còn lỗi (cảnh báo không chặn). Sau đó "Đồng bộ sang chấm công": xem trước từng ô sẽ ghi/cập nhật/xóa; ô đã có mã nghỉ phép, chế độ không bao giờ bị ghi đè.',
+      '"Xuất Excel" ra 4 trang: lịch theo vị trí/ca, lịch theo nhân sự (có công thức đếm), tổng hợp ca/giờ/công (đối chiếu công quy đổi của bảng chấm công – dùng cho bảng lương) và báo cáo vi phạm. Mỗi lần lập/sửa/chốt đều lưu phiên bản, khôi phục ở nút "Phiên bản".',
+    ],
+  },
+  {
     title: '5. Sao lưu và phục hồi',
     items: [
       'Dữ liệu nằm trong trình duyệt của máy hiện tại. Xóa dữ liệu duyệt web hoặc hỏng máy có thể làm mất dữ liệu.',
