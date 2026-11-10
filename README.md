@@ -30,3 +30,16 @@ owned by customers (`res.partner`), their maritime communication equipment,
 and maintenance work orders, with its own security groups and multi-company
 scoping. It is independent of the FastAPI app above — install it into an
 Odoo 17.0 instance with `addons/` on the addons path.
+
+## Dashboard chấm công đa Đài TTDH
+
+Ứng dụng web chấm công theo tháng cho các Đài Thông tin Duyên hải (React + TypeScript,
+IndexedDB, xuất/nhập Excel bằng ExcelJS) nằm trong thư mục [`cham-cong/`](cham-cong/).
+Hướng dẫn cài đặt, sử dụng, sao lưu và triển khai cho Đài mới: [cham-cong/README.md](cham-cong/README.md).
+
+```bash
+cd cham-cong && npm install
+npm test        # kiểm thử
+npm run dev     # chạy thử
+npm run build   # đóng gói vào cham-cong/dist
+```
