@@ -34,7 +34,8 @@ Odoo 17.0 instance with `addons/` on the addons path.
 ## Excel Dashboard
 
 Web app cho nhân viên tải file Excel/CSV lên và tự động tạo dashboard (KPI, xu
-hướng, cơ cấu, phân bố, bảng chi tiết, biểu đồ tự thêm). Xem
+hướng, cơ cấu, phân bố, bảng chi tiết, biểu đồ tự thêm) và xuất báo cáo Excel, PDF,
+Word theo đúng bộ lọc đang xem. Xem
 [docs/EXCEL_DASHBOARD.md](docs/EXCEL_DASHBOARD.md).
 
 ```bash

@@ -24,7 +24,17 @@
     filters: {},        // colIdx -> value
     dateFrom: "", dateTo: "",
     charts: [],         // Chart.js instances
-    tableSearch: "", tablePage: 0, tableSort: null,
+    search: "", tablePage: 0, tableSort: null,
+    viewIdx: [],        // row indices left after filters + search (source order)
+    kpis: [],           // KPI values as rendered, sent with exports
+    rendered: [],       // [{spec, title, groups}] charts as rendered
+    exporting: false,
+  };
+  // Fixed light palette for chart images embedded in PDF/Word reports.
+  const PRINT_THEME = {
+    text: "#0b0b0b", text2: "#52514e", grid: "#e2e1dc", surface: "#ffffff", other: "#a3a29c",
+    palette: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
+    fontSize: 15,
   };
 
   // ---------------------------------------------------------------- helpers
@@ -178,8 +188,7 @@
   function selectSheet(i) {
     state.sheetIdx = i;
     state.filters = {}; state.dateFrom = ""; state.dateTo = "";
-    state.tableSearch = ""; state.tablePage = 0; state.tableSort = null;
-    $("tableSearch").value = "";
+    state.search = ""; state.tablePage = 0; state.tableSort = null;
     [...$("sheetTabs").children].forEach((b, j) => b.classList.toggle("active", j === i));
     const s = sheet();
     const notes = [];
@@ -215,19 +224,22 @@
       const values = [...new Set(rows.map((r) => r[d.idx]).filter((v) => v != null))].sort((a, b) => a.localeCompare(b, "vi"));
       const sel = el("select", { onchange: (e) => { setFilter(d.idx, e.target.value); } },
         el("option", { value: "" }, "Tất cả"), values.map((v) => el("option", { value: v }, v)));
+      sel.value = state.filters[d.idx] || "";
       box.append(el("label", { class: "field" }, d.name, sel));
     }
     const t = timeCol();
     if (t) {
-      const from = el("input", { type: "date", min: t.min.slice(0, 10), max: t.max.slice(0, 10),
+      const from = el("input", { type: "date", min: t.min.slice(0, 10), max: t.max.slice(0, 10), value: state.dateFrom || null,
         onchange: (e) => { state.dateFrom = e.target.value; refresh(); } });
-      const to = el("input", { type: "date", min: t.min.slice(0, 10), max: t.max.slice(0, 10),
+      const to = el("input", { type: "date", min: t.min.slice(0, 10), max: t.max.slice(0, 10), value: state.dateTo || null,
         onchange: (e) => { state.dateTo = e.target.value; refresh(); } });
       box.append(el("label", { class: "field" }, t.name + " từ", from), el("label", { class: "field" }, "đến", to));
     }
-    if (box.children.length) {
-      box.append(el("button", { class: "btn ghost", type: "button", onclick: () => { selectSheet(state.sheetIdx); } }, "Xoá lọc"));
-    }
+    let timer;
+    const search = el("input", { type: "search", id: "globalSearch", placeholder: "Tìm trong mọi cột…", value: state.search || null,
+      oninput: (e) => { clearTimeout(timer); timer = setTimeout(() => { state.search = e.target.value.trim(); refresh(); }, 250); } });
+    box.append(el("label", { class: "field" }, "Tìm kiếm", search));
+    box.append(el("button", { class: "btn ghost", type: "button", onclick: () => { selectSheet(state.sheetIdx); } }, "Xoá lọc"));
   }
   function setFilter(idx, value) {
     if (value) state.filters[idx] = value; else delete state.filters[idx];
@@ -235,19 +247,36 @@
   }
   function refresh() { state.tablePage = 0; renderSheet(); }
 
-  function filteredRows() {
+  /** Indices of rows matching the filters, date range and search, in source order. */
+  function viewIndices() {
     const t = timeCol();
     const entries = Object.entries(state.filters);
-    return sheet().rows.filter((r) => {
-      for (const [i, v] of entries) if (r[i] !== v) return false;
+    const q = state.search.toLowerCase();
+    const out = [];
+    sheet().rows.forEach((r, i) => {
+      for (const [ci, v] of entries) if (r[ci] !== v) return;
       if (t && (state.dateFrom || state.dateTo)) {
         const d = r[t.idx];
-        if (!d) return false;
+        if (!d) return;
         const day = d.slice(0, 10);
-        if (state.dateFrom && day < state.dateFrom) return false;
-        if (state.dateTo && day > state.dateTo) return false;
+        if (state.dateFrom && day < state.dateFrom) return;
+        if (state.dateTo && day > state.dateTo) return;
       }
-      return true;
+      if (q && !r.some((v) => v != null && String(v).toLowerCase().includes(q))) return;
+      out.push(i);
+    });
+    return out;
+  }
+  /** The table's current sort applied to a list of row indices. */
+  function sortedIndices(indices) {
+    if (!state.tableSort) return indices;
+    const { idx, dir } = state.tableSort;
+    const rows = sheet().rows;
+    return [...indices].sort((ia, ib) => {
+      const x = rows[ia][idx], y = rows[ib][idx];
+      if (x == null) return y == null ? 0 : 1;
+      if (y == null) return -1;
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "vi")) * dir;
     });
   }
 
@@ -314,24 +343,33 @@
   function renderSheet() {
     state.charts.forEach((c) => c.destroy());
     state.charts = [];
-    const rows = filteredRows();
+    state.viewIdx = viewIndices();
+    const all = sheet().rows;
+    const rows = state.viewIdx.map((i) => all[i]);
     renderKpis(rows);
     renderCharts(rows);
-    renderTable(rows);
+    renderTable();
+    renderExportSummary();
   }
 
   function renderKpis(rows) {
     const box = $("kpis");
     box.replaceChildren();
+    state.kpis = [];
+    const add = (label, display, sub, value, mode, column) => {
+      box.append(kpi(label, display, sub));
+      state.kpis.push({ label, value, sub, mode, column: column || null });
+    };
     const total = sheet().rows.length;
-    box.append(kpi("Số dòng", nf.format(rows.length), rows.length !== total ? `trên tổng ${nf.format(total)}` : "toàn bộ dữ liệu"));
+    add("Số dòng", nf.format(rows.length), rows.length !== total ? `trên tổng ${nf.format(total)}` : "toàn bộ dữ liệu", rows.length, "count");
     for (const m of measures().slice(0, 5)) {
       const vals = rows.map((r) => r[m.idx]).filter((v) => typeof v === "number");
-      if (!vals.length) { box.append(kpi(m.name, "–", "không có giá trị")); continue; }
+      const avgMode = defaultAgg(m) === "avg";
+      if (!vals.length) { add(m.name + (avgMode ? " (TB)" : ""), "–", "không có giá trị", null, avgMode ? "avg" : "sum", m.name); continue; }
       const sum = vals.reduce((a, b) => a + b, 0), avg = sum / vals.length;
       const [lo, hi] = extent(vals);
-      if (defaultAgg(m) === "avg") box.append(kpi(m.name + " (TB)", fmtKpi(avg), `Thấp nhất ${nf.format(lo)} · Cao nhất ${nf.format(hi)}`));
-      else box.append(kpi(m.name, fmtKpi(sum), (Math.abs(sum) >= 1e6 ? `= ${nf.format(sum)} · ` : "") + `TB ${nf.format(avg)} / dòng`));
+      if (avgMode) add(m.name + " (TB)", fmtKpi(avg), `Thấp nhất ${nf.format(lo)} · Cao nhất ${nf.format(hi)}`, avg, "avg", m.name);
+      else add(m.name, fmtKpi(sum), (Math.abs(sum) >= 1e6 ? `= ${nf.format(sum)} · ` : "") + `TB ${nf.format(avg)} / dòng`, sum, "sum", m.name);
     }
   }
   function extent(vals) {
@@ -367,6 +405,7 @@
   function renderCharts(rows) {
     const box = $("charts");
     box.replaceChildren();
+    state.rendered = [];
     const custom = (state.current.dashboard.charts[sheet().name] || []).map((c) => ({ ...c, custom: true }));
     const specs = [...autoSpecs(), ...custom];
     if (!specs.length) {
@@ -400,6 +439,7 @@
       if (dim.role !== "time") groups = topN(groups, spec.type === "doughnut" ? 6 : TOP_N, spec.agg);
     }
 
+    state.rendered.push({ spec, title: specTitle(spec), groups });
     const canvas = el("canvas", { role: "img", "aria-label": specTitle(spec) });
     const boxEl = el("div", { class: "chart-box" }, canvas);
     if (spec.type === "hbar") boxEl.style.height = Math.max(200, groups.length * 26 + 40) + "px";
@@ -408,6 +448,8 @@
       el("button", { class: "btn small", type: "button", title: "Xem dạng bảng", onclick: () => {
         tableEl.hidden = !tableEl.hidden; boxEl.hidden = !tableEl.hidden;
       } }, "Bảng"),
+      el("button", { class: "btn small export-btn", type: "button", title: "Xuất bảng thống kê này ra Excel",
+        onclick: () => exportReport("xlsx", { chartId: spec.id, sections: { overview: false, stats: true, detail: false } }) }, "📊 Excel"),
       spec.custom ? el("button", { class: "btn small danger", type: "button", title: "Xoá biểu đồ", onclick: () => removeChart(spec.id) }, "Xoá") : null);
     const sub = spec.custom ? "Biểu đồ tự thêm" : "Tự động";
     const card = el("div", { class: "card chart-card" + (spec.wide ? " wide" : "") },
@@ -428,21 +470,52 @@
     return counts.map((n, i) => ({ key: i, label: `${nfCompact.format(min + i * w)}–${nfCompact.format(min + (i + 1) * w)}`, value: n }));
   }
 
+  /** Column headings for a chart's statistics table (dashboard and reports). */
+  function groupLabels(spec) {
+    const value = spec.type === "hist" ? "Số dòng" : spec.measure && spec.agg !== "count" ? `${AGG_LABEL[spec.agg]} ${spec.measure}` : "Số dòng";
+    let dim = spec.type === "hist" ? `Khoảng ${spec.measure}` : spec.dimension;
+    if (spec.type !== "hist" && spec.time_grain) dim += ` (theo ${GRAIN_LABEL[spec.time_grain]})`;
+    return { dim, value };
+  }
   function groupTable(groups, spec) {
-    const valHead = spec.type === "hist" ? "Số dòng" : spec.measure && spec.agg !== "count" ? `${AGG_LABEL[spec.agg]} ${spec.measure}` : "Số dòng";
+    const l = groupLabels(spec);
     return el("table", { class: "table" },
-      el("thead", {}, el("tr", {}, el("th", {}, spec.type === "hist" ? "Khoảng" : spec.dimension), el("th", {}, valHead))),
+      el("thead", {}, el("tr", {}, el("th", {}, l.dim), el("th", {}, l.value))),
       el("tbody", {}, groups.map((g) => el("tr", {}, el("td", {}, g.label), el("td", { class: "num" }, fmt(g.value))))));
   }
 
+  function screenTheme() {
+    return { text: cssVar("--text-primary"), text2: cssVar("--text-secondary"), grid: cssVar("--grid"), surface: cssVar("--surface-1"),
+      other: cssVar("--other"), palette: seriesColors(), fontSize: 12 };
+  }
   function drawChart(canvas, spec, groups) {
     if (!window.Chart || !canvas.isConnected) return;
-    const text2 = cssVar("--text-secondary"), grid = cssVar("--grid"), surface = cssVar("--surface-1");
-    const palette = seriesColors(), other = cssVar("--other");
+    state.charts.push(new Chart(canvas, chartConfig(spec, groups, screenTheme())));
+  }
+  /** Render a chart off-screen in the print palette and return it as a PNG data URL. */
+  function chartImage(spec, groups) {
+    if (!window.Chart || !groups.length) return null;
+    const w = 1100, h = spec.type === "hbar" ? Math.min(1400, Math.max(380, groups.length * 34 + 80)) : 480;
+    const holder = el("div", { style: `position:fixed;left:-20000px;top:0;width:${w}px;height:${h}px` });
+    const canvas = el("canvas", { width: w, height: h, style: `width:${w}px;height:${h}px` });
+    holder.append(canvas);
+    document.body.append(holder);
+    try {
+      const cfg = chartConfig(spec, groups, PRINT_THEME);
+      Object.assign(cfg.options, { responsive: false, animation: false, devicePixelRatio: 2 });
+      cfg.plugins = [{ id: "whiteBg", beforeDraw: (c) => { const x = c.ctx; x.save(); x.fillStyle = "#ffffff"; x.fillRect(0, 0, c.width, c.height); x.restore(); } }];
+      const chart = new Chart(canvas, cfg);
+      const url = canvas.toDataURL("image/png");
+      chart.destroy();
+      return url;
+    } finally { holder.remove(); }
+  }
+  function chartConfig(spec, groups, theme) {
+    const { text2, grid, surface, palette, other } = theme;
     const labels = groups.map((g) => g.label), data = groups.map((g) => g.value);
-    const font = { family: getComputedStyle(document.body).fontFamily, size: 12 };
+    const font = { family: getComputedStyle(document.body).fontFamily, size: theme.fontSize };
     const tooltip = {
-      backgroundColor: cssVar("--text-primary"), titleColor: surface, bodyColor: surface,
+      backgroundColor: theme.text, titleColor: surface, bodyColor: surface,
       padding: 10, cornerRadius: 6, displayColors: spec.type === "doughnut",
       callbacks: { label: (ctx) => " " + nf.format(spec.type === "hbar" ? ctx.parsed.x : ctx.parsed.y) },
     };
@@ -484,7 +557,7 @@
         },
       };
     }
-    state.charts.push(new Chart(canvas, cfg));
+    return cfg;
   }
 
   // ---------------------------------------------------------------- custom charts
@@ -561,18 +634,10 @@
         el("td", { class: "num" }, c.type === "date" ? fmtDate(c.max) : fmt(c.max))))));
   }
 
-  function renderTable(rows) {
+  function renderTable() {
     const c = cols();
-    const q = state.tableSearch.toLowerCase();
-    let view = q ? rows.filter((r) => r.some((v) => v != null && String(v).toLowerCase().includes(q))) : rows;
-    if (state.tableSort) {
-      const { idx, dir } = state.tableSort;
-      view = [...view].sort((a, b) => {
-        const x = a[idx], y = b[idx];
-        if (x == null) return 1; if (y == null) return -1;
-        return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "vi")) * dir;
-      });
-    }
+    const all = sheet().rows;
+    const view = sortedIndices(state.viewIdx).map((i) => all[i]);
     const pages = Math.max(1, Math.ceil(view.length / PAGE_SIZE));
     state.tablePage = Math.min(state.tablePage, pages - 1);
     const pageRows = view.slice(state.tablePage * PAGE_SIZE, (state.tablePage + 1) * PAGE_SIZE);
@@ -582,15 +647,218 @@
         onclick: () => {
           const s = state.tableSort;
           state.tableSort = s && s.idx === col.idx ? (s.dir === 1 ? { idx: col.idx, dir: -1 } : null) : { idx: col.idx, dir: 1 };
-          renderTable(filteredRows());
+          renderTable();
+          renderExportSummary();
         },
       }, col.name + (state.tableSort && state.tableSort.idx === col.idx ? (state.tableSort.dir === 1 ? " ▲" : " ▼") : ""))))),
       el("tbody", {}, pageRows.map((r) => el("tr", {}, c.map((col) => el("td", { class: col.type === "number" ? "num" : null },
         col.type === "date" ? fmtDate(r[col.idx]) : fmt(r[col.idx])))))));
     $("pager").replaceChildren(
       el("span", {}, `${nf.format(view.length)} dòng · trang ${state.tablePage + 1}/${pages}`),
-      el("button", { class: "btn small", type: "button", disabled: state.tablePage === 0, onclick: () => { state.tablePage--; renderTable(filteredRows()); } }, "‹ Trước"),
-      el("button", { class: "btn small", type: "button", disabled: state.tablePage >= pages - 1, onclick: () => { state.tablePage++; renderTable(filteredRows()); } }, "Sau ›"));
+      el("button", { class: "btn small", type: "button", disabled: state.tablePage === 0, onclick: () => { state.tablePage--; renderTable(); } }, "‹ Trước"),
+      el("button", { class: "btn small", type: "button", disabled: state.tablePage >= pages - 1, onclick: () => { state.tablePage++; renderTable(); } }, "Sau ›"));
+  }
+
+  // ---------------------------------------------------------------- export
+  const FMT_LABEL = { xlsx: "Excel", pdf: "PDF", docx: "Word" };
+
+  /** Human-readable list of the conditions currently applied (printed in reports). */
+  function describeFilters() {
+    const out = [];
+    const c = cols();
+    for (const [idx, v] of Object.entries(state.filters)) out.push({ label: c[idx].name, value: v });
+    const t = timeCol();
+    if (t && (state.dateFrom || state.dateTo)) {
+      const d = (s) => s.split("-").reverse().join("/");
+      out.push({ label: t.name, value: `${state.dateFrom ? "từ " + d(state.dateFrom) : ""}${state.dateFrom && state.dateTo ? " " : ""}${state.dateTo ? "đến " + d(state.dateTo) : ""}` });
+    }
+    if (state.search) out.push({ label: "Từ khoá tìm kiếm", value: `"${state.search}"` });
+    if (state.tableSort) out.push({ label: "Sắp xếp", value: `${c[state.tableSort.idx].name} ${state.tableSort.dir === 1 ? "tăng dần" : "giảm dần"}` });
+    return out;
+  }
+
+  function exportSections() {
+    return { overview: $("optOverview").checked, stats: $("optStats").checked, detail: $("optDetail").checked };
+  }
+
+  function renderExportSummary() {
+    if (!state.current) return;
+    const n = state.viewIdx.length, total = sheet().rows.length;
+    const f = describeFilters().filter((x) => x.label !== "Sắp xếp");
+    const all = $("optScope").value === "all_sheets";
+    $("exportSummary").textContent = all
+      ? `Excel sẽ chứa toàn bộ ${state.current.sheets.length} sheet, không áp dụng bộ lọc.`
+      : `Báo cáo sẽ chứa ${nf.format(n)}/${nf.format(total)} dòng của sheet "${sheet().name}"` +
+        (f.length ? ` · lọc: ${f.map((x) => `${x.label} = ${x.value}`).join("; ")}` : " · không lọc") + ` · ${state.rendered.length} bảng thống kê.`;
+  }
+
+  function buildPayload(fmt, opts) {
+    const sections = opts.sections || exportSections();
+    if (!sections.overview && !sections.stats && !sections.detail) throw new Error("Hãy chọn ít nhất một nội dung để xuất.");
+    const scope = fmt === "xlsx" && !opts.chartId ? $("optScope").value : "current";
+    if (scope === "current" && !state.viewIdx.length) {
+      throw new Error("Không có dữ liệu phù hợp với bộ lọc hiện tại. Hãy đổi bộ lọc trước khi xuất báo cáo.");
+    }
+    const unchanged = state.viewIdx.length === sheet().rows.length && !state.tableSort;
+    const picked = state.rendered.filter((r) => !opts.chartId || r.spec.id === opts.chartId);
+    return {
+      sheet: sheet().name,
+      author: $("optAuthor").value.trim(),
+      scope,
+      sections,
+      row_indices: unchanged ? null : sortedIndices(state.viewIdx),
+      filters: describeFilters(),
+      kpis: state.kpis,
+      charts: sections.stats ? picked.map((r) => {
+        const l = groupLabels(r.spec);
+        return {
+          id: r.spec.id, title: r.title, type: r.spec.type, dimension: r.spec.dimension, measure: r.spec.measure || null,
+          agg: r.spec.agg, dimension_label: l.dim, value_label: l.value,
+          groups: r.groups.map((g) => ({ label: String(g.label), value: g.value, other: !!g.other })),
+          image: fmt === "xlsx" ? null : chartImage(r.spec, r.groups),
+        };
+      }) : [],
+    };
+  }
+
+  function filenameFrom(disposition) {
+    if (!disposition) return null;
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    if (star) { try { return decodeURIComponent(star[1]); } catch (_) {} }
+    const plain = /filename="([^"]+)"/i.exec(disposition);
+    return plain ? plain[1] : null;
+  }
+
+  function saveBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = el("a", { href: url, download: name, style: "display:none" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  function setBusy(busy, label) {
+    state.exporting = busy;
+    document.querySelectorAll(".export-btn, #previewBtn, #reloadBtn").forEach((b) => {
+      b.disabled = busy;
+      if (busy && b.dataset.fmt === label) { b.dataset.text = b.textContent; b.textContent = "⏳ Đang tạo…"; }
+      if (!busy && b.dataset.text) { b.textContent = b.dataset.text; delete b.dataset.text; }
+    });
+    $("exportPanel").classList.toggle("busy", busy);
+  }
+
+  function setStatus(msg, kind) {
+    const st = $("exportStatus");
+    st.className = "export-status" + (kind ? " " + kind : "");
+    st.textContent = msg;
+  }
+
+  async function errorText(res) {
+    try {
+      const j = await res.json();
+      if (typeof j.detail === "string") return j.detail;
+      if (Array.isArray(j.detail)) return j.detail.map((d) => d.msg).join("; ");
+    } catch (_) {}
+    return `Lỗi máy chủ (HTTP ${res.status})`;
+  }
+
+  /** Ask the server for a report file. Returns {blob, name}; throws with a readable message. */
+  async function requestReport(fmt, opts) {
+    const payload = buildPayload(fmt, opts);
+    const q = opts.inline ? "?inline=true" : "";
+    const res = await fetch(`/api/datasets/${state.current.meta.id}/export/${fmt}${q}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await errorText(res));
+    const blob = await res.blob();
+    if (!blob.size) throw new Error("Máy chủ trả về file rỗng.");
+    const name = filenameFrom(res.headers.get("Content-Disposition")) || `BaoCao.${fmt}`;
+    return { blob, name, rows: res.headers.get("X-Report-Rows") };
+  }
+
+  async function exportReport(fmt, opts = {}) {
+    if (!state.current || state.exporting) return;
+    const t0 = performance.now();
+    setBusy(true, fmt);
+    setStatus(`Đang tạo file ${FMT_LABEL[fmt]}…`, "busy");
+    try {
+      const { blob, name, rows } = await requestReport(fmt, opts);
+      saveBlob(blob, name);
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      const msg = `✅ Đã tạo ${name} (${(blob.size / 1024).toFixed(0)} KB, ${nf.format(+rows || 0)} dòng, ${secs} giây). Trình duyệt đang tải file xuống.`;
+      setStatus(msg, "ok");
+      toast(`Xuất ${FMT_LABEL[fmt]} thành công: ${name}`);
+    } catch (e) {
+      setStatus(`❌ Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`, "error");
+      toast(`Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`);
+    } finally { setBusy(false); }
+  }
+
+  let preview = null; // {url, blob, name}
+  async function openPreview() {
+    if (!state.current || state.exporting) return;
+    setBusy(true, "preview");
+    setStatus("Đang dựng bản xem trước (PDF)…", "busy");
+    try {
+      const r = await requestReport("pdf", { inline: true });
+      closePreview();
+      preview = { ...r, url: URL.createObjectURL(r.blob) };
+      $("previewFrame").src = preview.url;
+      $("previewName").textContent = r.name;
+      $("previewModal").hidden = false;
+      setStatus("Bản xem trước chính là file PDF sẽ được tải xuống.", "ok");
+    } catch (e) {
+      setStatus(`❌ Không tạo được bản xem trước: ${e.message}`, "error");
+      toast("Không tạo được bản xem trước: " + e.message);
+    } finally { setBusy(false); }
+  }
+  function closePreview() {
+    $("previewModal").hidden = true;
+    $("previewFrame").removeAttribute("src");
+    if (preview) { URL.revokeObjectURL(preview.url); preview = null; }
+  }
+
+  /** Re-fetch the dataset and list from the server, keeping sheet, filters, search and sort. */
+  async function reloadData() {
+    if (!state.current || state.exporting) return;
+    const keep = { sheet: sheet().name, filters: Object.fromEntries(Object.entries(state.filters).map(([i, v]) => [cols()[i].name, v])),
+      dateFrom: state.dateFrom, dateTo: state.dateTo, search: state.search, sort: state.tableSort && { name: cols()[state.tableSort.idx].name, dir: state.tableSort.dir } };
+    setBusy(true, "reload");
+    try {
+      const fresh = await api("/api/datasets/" + state.current.meta.id);
+      fresh.dashboard.charts = fresh.dashboard.charts || {};
+      state.current = fresh;
+      renderTabs();
+      const idx = Math.max(0, fresh.sheets.findIndex((s) => s.name === keep.sheet));
+      selectSheet(idx);
+      const byName = Object.fromEntries(cols().map((c) => [c.name, c.idx]));
+      for (const [name, v] of Object.entries(keep.filters)) if (name in byName) state.filters[byName[name]] = v;
+      Object.assign(state, { dateFrom: keep.dateFrom, dateTo: keep.dateTo, search: keep.search });
+      if (keep.sort && keep.sort.name in byName) state.tableSort = { idx: byName[keep.sort.name], dir: keep.sort.dir };
+      renderFilters();
+      renderSheet();
+      await loadList();
+      setStatus(`🔄 Đã làm mới dữ liệu lúc ${new Date().toLocaleTimeString("vi-VN")}.`, "ok");
+    } catch (e) {
+      setStatus("❌ Không làm mới được dữ liệu: " + e.message, "error");
+    } finally { setBusy(false); }
+  }
+
+  function initExport() {
+    document.querySelectorAll("#exportPanel .export-btn[data-fmt]").forEach((b) =>
+      b.addEventListener("click", () => exportReport(b.dataset.fmt)));
+    $("previewBtn").addEventListener("click", openPreview);
+    $("reloadBtn").addEventListener("click", reloadData);
+    $("previewClose").addEventListener("click", closePreview);
+    $("previewDownload").addEventListener("click", () => {
+      if (preview) { saveBlob(preview.blob, preview.name); toast("Đã tải xuống " + preview.name); }
+    });
+    $("previewModal").addEventListener("click", (e) => { if (e.target === $("previewModal")) closePreview(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("previewModal").hidden) closePreview(); });
+    ["optOverview", "optStats", "optDetail", "optScope"].forEach((id) => $(id).addEventListener("change", renderExportSummary));
+    try { $("optAuthor").value = localStorage.getItem("xd-author") || localStorage.getItem("xd-uploader") || ""; } catch (_) {}
+    $("optAuthor").addEventListener("change", () => { try { localStorage.setItem("xd-author", $("optAuthor").value); } catch (_) {} });
   }
 
   // ---------------------------------------------------------------- init
@@ -599,12 +867,7 @@
     initUpload();
     initBuilder();
     $("datasetSearch").addEventListener("input", renderList);
-    let tsTimer;
-    $("tableSearch").addEventListener("input", (e) => {
-      clearTimeout(tsTimer);
-      tsTimer = setTimeout(() => { state.tableSearch = e.target.value.trim(); state.tablePage = 0; renderTable(filteredRows()); }, 200);
-    });
-    $("printBtn").addEventListener("click", () => window.print());
+    initExport();
     $("deleteBtn").addEventListener("click", async () => {
       const m = state.current.meta;
       if (!confirm(`Xoá bộ dữ liệu "${m.title}"? Thao tác không thể hoàn tác.`)) return;

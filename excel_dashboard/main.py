@@ -11,12 +11,14 @@ import os
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from urllib.parse import quote
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from excel_dashboard import storage
+from excel_dashboard import export, storage
 from excel_dashboard.parser import SpreadsheetError, parse_spreadsheet
 
 MAX_UPLOAD_BYTES = int(os.environ.get("EXCEL_DASHBOARD_MAX_MB", "20")) * 1024 * 1024
@@ -98,6 +100,39 @@ def download_original(dataset_id: str):
     except KeyError:
         raise _not_found()
     return FileResponse(path, filename=meta["filename"])
+
+
+@app.post("/api/datasets/{dataset_id}/export/{fmt}")
+def export_report(
+    dataset_id: str,
+    fmt: Literal["xlsx", "pdf", "docx"],
+    req: export.ExportRequest,
+    inline: bool = Query(False, description="Content-Disposition inline (PDF preview)"),
+):
+    """Build a real report file from the rows/KPIs/charts the dashboard is
+    showing. Returns the file bytes with a download filename
+    BaoCao_<TenBaoCao>_<YYYYMMDD>_<HHMM>.<ext>."""
+    try:
+        meta = storage.get_meta(dataset_id)
+        sheets = storage.get_sheets(dataset_id)
+    except KeyError:
+        raise _not_found()
+    try:
+        report = export.build_report(meta, sheets, req, fmt)
+    except export.ExportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    content = export.BUILDERS[fmt](report)
+    filename = export.report_filename(meta["title"], fmt, report.generated_at)
+    disposition = "inline" if inline and fmt == "pdf" else "attachment"
+    return Response(
+        content,
+        media_type=export.MEDIA_TYPES[fmt],
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}',
+            "Cache-Control": "no-store",
+            "X-Report-Rows": str(report.row_count),
+        },
+    )
 
 
 @app.delete("/api/datasets/{dataset_id}", status_code=204)

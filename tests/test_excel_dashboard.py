@@ -144,3 +144,165 @@ def test_index_page_served(client):
     res = client.get("/")
     assert res.status_code == 200
     assert "Excel Dashboard" in res.text
+
+
+# ---------------------------------------------------------------------------
+# Report export
+# ---------------------------------------------------------------------------
+
+from excel_dashboard import export as export_module  # noqa: E402
+
+
+def _upload(client):
+    res = client.post(
+        "/api/datasets",
+        files={"file": ("bao_cao.xlsx", _xlsx(SALES))},
+        data={"uploader": "Nguyễn Văn A", "title": "Doanh thu Quý I"},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+def _payload(indices=None, revenue=None, **extra):
+    # Rows (after the "Tổng cộng" row is dropped): 0 Cà Mau 15tr, 1 Bạc Liêu 8tr, 2 Cà Mau 24tr, 3 Kiên Giang 7.5tr
+    if indices is None:
+        indices = [2, 0]  # Cà Mau only, sorted by revenue desc
+    if revenue is None:
+        revenue = 39000000
+    body = {
+        "sheet": "Doanh thu",
+        "author": "Trần Thị Bé",
+        "row_indices": indices,
+        "filters": [{"label": "Chi nhánh", "value": "Cà Mau"}],
+        "kpis": [
+            {"label": "Số dòng", "value": len(indices), "mode": "count"},
+            {"label": "Doanh thu", "value": revenue, "mode": "sum", "column": "Doanh thu"},
+        ],
+        "charts": [{
+            "id": "c1", "title": "Tổng Doanh thu theo Sản phẩm", "type": "bar", "dimension": "Sản phẩm",
+            "measure": "Doanh thu", "agg": "sum", "dimension_label": "Sản phẩm", "value_label": "Tổng Doanh thu",
+            "groups": [{"label": "AIS", "value": 24000000}, {"label": "Thiết bị VHF", "value": 15000000}],
+        }],
+    }
+    body.update(extra)
+    return body
+
+
+def test_report_filename():
+    now = datetime(2026, 11, 17, 9, 5)
+    assert export_module.report_filename("Doanh thu Quý I/2026", "xlsx", now) == "BaoCao_DoanhThuQuyI2026_20261117_0905.xlsx"
+    assert export_module.report_filename("Đài TTDH", "pdf", now) == "BaoCao_DaiTTDH_20261117_0905.pdf"
+    assert export_module.report_filename("!!!", "pdf", now) == "BaoCao_BaoCao_20261117_0905.pdf"
+
+
+def test_export_xlsx_matches_filtered_dashboard(client):
+    ds = _upload(client)
+    res = client.post(f"/api/datasets/{ds}/export/xlsx", json=_payload())
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == export_module.MEDIA_TYPES["xlsx"]
+    cd = res.headers["content-disposition"]
+    assert cd.startswith('attachment; filename="BaoCao_DoanhThuQuyI_') and cd.endswith('.xlsx')
+    assert res.headers["x-report-rows"] == "2"
+
+    wb = openpyxl.load_workbook(io.BytesIO(res.content))
+    assert wb.sheetnames == ["Tổng quan", "TK01 Tổng Doanh thu theo Sản ph", "Dữ liệu chi tiết"]
+    overview = [[c for c in r if c is not None] for r in wb["Tổng quan"].iter_rows(values_only=True)]
+    assert ["Chi nhánh", "Cà Mau"] in overview
+    assert ["Doanh thu", 39000000, ] == overview[[r[:1] for r in overview].index(["Doanh thu"])][:2]
+
+    stats = wb["TK01 Tổng Doanh thu theo Sản ph"]
+    assert stats.freeze_panes == "A5"
+    assert stats.auto_filter.ref == "A4:C6"
+    assert [c.value for c in stats[5]][:3] == ["AIS", 24000000, 24000000 / 39000000]
+    assert [c.value for c in stats[7]][:2] == ["Tổng cộng", 39000000]
+    assert len(stats._charts) == 1
+
+    detail = wb["Dữ liệu chi tiết"]
+    assert detail.freeze_panes == "A5"
+    assert detail.auto_filter.ref == "A4:G6"
+    assert [c.value for c in detail[4]] == SALES[0]
+    # Rows come in the order the dashboard sent (sorted), with real dates and numbers.
+    assert [c.value for c in detail[5]][:6] == [3, datetime(2026, 2, 3), "Cà Mau", "AIS", 3, 24000000]
+    assert detail["B5"].number_format == "dd/mm/yyyy"
+    assert detail["F5"].number_format == "#,##0"
+    assert detail.max_row == 6
+    assert detail.column_dimensions["G"].width >= 10
+
+
+def test_export_all_sheets_xlsx_ignores_filters(client):
+    ds = _upload(client)
+    res = client.post(f"/api/datasets/{ds}/export/xlsx", json=_payload(scope="all_sheets"))
+    assert res.status_code == 200, res.text
+    wb = openpyxl.load_workbook(io.BytesIO(res.content))
+    assert wb["Dữ liệu chi tiết"].max_row == 4 + 4
+
+
+def test_export_pdf_and_docx(client):
+    import docx
+
+    ds = _upload(client)
+    pdf = client.post(f"/api/datasets/{ds}/export/pdf", json=_payload())
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF")
+    assert b"DejaVu" in pdf.content  # Unicode font embedded for Vietnamese
+    inline = client.post(f"/api/datasets/{ds}/export/pdf?inline=true", json=_payload())
+    assert inline.headers["content-disposition"].startswith("inline;")
+
+    res = client.post(f"/api/datasets/{ds}/export/docx", json=_payload())
+    assert res.status_code == 200, res.text
+    d = docx.Document(io.BytesIO(res.content))
+    text = "\n".join(p.text for p in d.paragraphs)
+    assert "BÁO CÁO DOANH THU QUÝ I" in text
+    assert "Dữ liệu chi tiết (2 dòng)" in text
+    detail = d.tables[-1]
+    assert [c.text for c in detail.rows[0].cells] == SALES[0]
+    assert [c.text for c in detail.rows[1].cells][:6] == ["3", "03/02/2026", "Cà Mau", "AIS", "3", "24.000.000"]
+    assert len(detail.rows) == 3
+
+
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        (_payload(indices=[], revenue=None), "Không có dữ liệu"),
+        (_payload(revenue=39000001), "khác dữ liệu máy chủ"),
+        (_payload(indices=[0, 99]), "không hợp lệ"),
+        (_payload(indices=[0, 0]), "không hợp lệ"),
+        ({**_payload(), "sections": {"overview": False, "stats": False, "detail": False}}, "Chưa chọn"),
+    ],
+)
+def test_export_rejects_bad_requests(client, body, message):
+    ds = _upload(client)
+    res = client.post(f"/api/datasets/{ds}/export/xlsx", json=body)
+    assert res.status_code == 422
+    assert message in res.json()["detail"]
+
+
+def test_export_chart_total_mismatch_rejected(client):
+    ds = _upload(client)
+    body = _payload()
+    body["charts"][0]["groups"][0]["value"] = 1
+    res = client.post(f"/api/datasets/{ds}/export/xlsx", json=body)
+    assert res.status_code == 422 and "không khớp" in res.json()["detail"]
+
+
+def test_export_limits_and_scope(client, monkeypatch):
+    ds = _upload(client)
+    assert client.post(f"/api/datasets/{ds}/export/pdf", json=_payload(scope="all_sheets")).status_code == 422
+    monkeypatch.setattr(export_module, "PDF_MAX_DETAIL_ROWS", 1)
+    res = client.post(f"/api/datasets/{ds}/export/pdf", json=_payload())
+    assert res.status_code == 422 and "vượt giới hạn" in res.json()["detail"]
+    ok = client.post(f"/api/datasets/{ds}/export/pdf", json={**_payload(), "sections": {"detail": False}})
+    assert ok.status_code == 200
+    assert client.post(f"/api/datasets/{ds}/export/csv", json=_payload()).status_code == 422
+    assert client.post("/api/datasets/" + "0" * 32 + "/export/xlsx", json=_payload()).status_code == 404
+
+
+def test_export_never_writes_formulas(client):
+    csv_text = "Tên,Giá trị\n=1+1,1\nb,2\n"
+    res = client.post("/api/datasets", files={"file": ("f.csv", csv_text.encode())})
+    ds = res.json()["id"]
+    out = client.post(f"/api/datasets/{ds}/export/xlsx", json={"sheet": "CSV", "sections": {"overview": False, "stats": False}})
+    assert out.status_code == 200, out.text
+    cell = openpyxl.load_workbook(io.BytesIO(out.content))["Dữ liệu chi tiết"]["A5"]
+    assert cell.value == "=1+1" and cell.data_type == "s"

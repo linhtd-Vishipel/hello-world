@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Excel Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cg fill=%27%232a78d6%27%3E%3Crect x=%273%27 y=%2712%27 width=%274%27 height=%279%27 rx=%271%27/%3E%3Crect x=%2710%27 y=%277%27 width=%274%27 height=%2714%27 rx=%271%27/%3E%3Crect x=%2717%27 y=%273%27 width=%274%27 height=%2718%27 rx=%271%27/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/vendor/chart.umd.min.js"></script>
 </head>
@@ -60,10 +61,37 @@
           </div>
           <div class="actions">
             <a class="btn ghost" id="downloadBtn" href="#">Tải file gốc</a>
-            <button class="btn ghost" id="printBtn" type="button">In / PDF</button>
             <button class="btn danger" id="deleteBtn" type="button">Xoá</button>
           </div>
         </div>
+
+        <section class="card export" id="exportPanel" aria-labelledby="exportTitle">
+          <div class="export-head">
+            <h2 id="exportTitle">Xuất báo cáo</h2>
+            <span class="muted" id="exportSummary"></span>
+          </div>
+          <div class="export-actions">
+            <button class="btn export-btn xlsx" type="button" data-fmt="xlsx" title="File .xlsx: tổng quan, bảng thống kê kèm biểu đồ, dữ liệu chi tiết">📊 Xuất Excel</button>
+            <button class="btn export-btn pdf" type="button" data-fmt="pdf" title="File .pdf khổ A4: chỉ số, biểu đồ, bảng thống kê, dữ liệu chi tiết">📄 Xuất PDF</button>
+            <button class="btn export-btn docx" type="button" data-fmt="docx" title="File .docx: chỉ số, biểu đồ, bảng thống kê, dữ liệu chi tiết">📝 Xuất Word</button>
+            <button class="btn" type="button" id="previewBtn" data-fmt="preview">👁 Xem trước báo cáo</button>
+            <button class="btn" type="button" id="reloadBtn" data-fmt="reload" title="Tải lại dữ liệu từ máy chủ, giữ nguyên bộ lọc">🔄 Làm mới dữ liệu</button>
+          </div>
+          <div class="export-options">
+            <span class="opt-label">Nội dung:</span>
+            <label class="check"><input type="checkbox" id="optOverview" checked> Chỉ số tổng hợp</label>
+            <label class="check"><input type="checkbox" id="optStats" checked> Biểu đồ &amp; bảng thống kê</label>
+            <label class="check"><input type="checkbox" id="optDetail" checked> Dữ liệu chi tiết</label>
+            <label class="inline">Phạm vi Excel
+              <select id="optScope">
+                <option value="current">Sheet hiện tại, theo bộ lọc</option>
+                <option value="all_sheets">Toàn bộ dữ liệu mọi sheet (không lọc)</option>
+              </select>
+            </label>
+            <label class="inline">Người lập <input type="text" id="optAuthor" maxlength="100" placeholder="Họ tên"></label>
+          </div>
+          <p class="export-status" id="exportStatus" role="status" aria-live="polite"></p>
+        </section>
 
         <nav class="tabs" id="sheetTabs" aria-label="Sheet"></nav>
         <p class="notice" id="sheetNotice" hidden></p>
@@ -123,13 +151,29 @@
         <section class="card">
           <div class="row-between">
             <h2>Dữ liệu chi tiết</h2>
-            <input type="search" id="tableSearch" placeholder="Tìm trong bảng…">
+            <span class="muted">Bấm tiêu đề cột để sắp xếp. Thứ tự này cũng áp dụng khi xuất báo cáo.</span>
           </div>
           <div class="table-wrap"><table class="table" id="dataTable"></table></div>
           <div class="pager" id="pager"></div>
         </section>
       </div>
     </main>
+  </div>
+
+  <div class="modal" id="previewModal" hidden role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div>
+          <h2 id="previewTitle">Xem trước báo cáo</h2>
+          <span class="muted" id="previewName"></span>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="button" id="previewDownload">📄 Tải PDF này</button>
+          <button class="btn" type="button" id="previewClose">Đóng</button>
+        </div>
+      </div>
+      <iframe id="previewFrame" title="Xem trước báo cáo PDF"></iframe>
+    </div>
   </div>
 
   <div class="tooltip" id="toast" role="alert" hidden></div>
