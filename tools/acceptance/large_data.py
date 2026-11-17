@@ -4,7 +4,7 @@
 
 Uploads the 25,000-row and 200,000-row samples, then exports at and beyond
 the PDF/Word limits and the full 200,000 rows to Excel. Reports time, file
-size, HTTP status, the server's error message, and (Linux, with --pid) the
+size, HTTP status, the server's error message, and (Windows/Linux, with --pid) the
 server's peak memory. Exit code 1 if any check fails.
 """
 import argparse
@@ -24,10 +24,21 @@ def check(name, ok, detail=""):
 
 
 def peak_rss_mb(pid):
+    """Peak memory of the server process: Windows peak working set (psutil),
+    Linux VmHWM. None when it cannot be measured."""
     if not pid:
         return None
     try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+        import psutil
+
+        info = psutil.Process(pid).memory_info()
+        peak = getattr(info, "peak_wset", None)  # Windows
+        if peak:
+            return peak // (1024 * 1024)
+    except Exception:
+        pass
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
             if line.startswith("VmHWM:"):
                 return int(line.split()[1]) // 1024
     except OSError:
@@ -100,7 +111,7 @@ def main():
     r = c.get("/api/datasets")
     check("API vẫn phản hồi sau các lần xuất lớn", r.status_code == 200, f"{(time.time() - t) * 1000:.0f} ms")
     print(f"\nRSS đỉnh của máy chủ: {peak_rss_mb(a.pid)} MB")
-    (out / "large_results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1))
+    (out / "large_results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     sys.exit(0 if all(ok for _, ok, _ in results) else 1)
 
 

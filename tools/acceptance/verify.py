@@ -20,6 +20,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -54,7 +56,26 @@ def parse_vn(s):
 
 
 def run(*cmd):
-    return subprocess.run(cmd, capture_output=True, text=True).stdout
+    # Poppler writes UTF-8; never decode with the Windows ANSI code page.
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+
+
+class block:
+    """Run one group of checks; an exception becomes a FAIL instead of
+    aborting the whole verification (e.g. a file missing because a UI step failed)."""
+
+    def __init__(self, group, name):
+        self.group, self.name = group, name
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, et, ev, tb):
+        if et is None:
+            return False
+        check(self.group, f"{self.name}: không thực hiện được", False, f"{et.__name__}: {str(ev)[:200]}")
+        traceback.print_exception(et, ev, tb, file=sys.stderr)
+        return True
 
 
 def one(out, pattern):
@@ -124,14 +145,26 @@ def pdf_layout(group, pdf, margin=MARGIN_PT, expect_footer=True):
     return run("pdftotext", "-layout", pdf, "-")
 
 
+def find_soffice():
+    """LibreOffice: NGHIEMTHU_SOFFICE, PATH, or the standard Windows install folders."""
+    cands = [os.environ.get("NGHIEMTHU_SOFFICE"), shutil.which("soffice"), shutil.which("libreoffice")]
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), r"C:\Program Files", r"C:\Program Files (x86)"):
+        if base:
+            cands.append(os.path.join(base, "LibreOffice", "program", "soffice.exe"))
+    return next((c for c in cands if c and os.path.isfile(c)), None)
+
+
 def office_to_pdf(path):
-    """Convert with LibreOffice (proves the file opens in an office suite)."""
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    """Convert with LibreOffice (proves the file opens in an office suite).
+    A private profile lets this run even while the user has LibreOffice open."""
+    soffice = find_soffice()
     if not soffice:
         return None
     d = tempfile.mkdtemp()
+    profile = Path(tempfile.mkdtemp()).as_uri()
     env = {**os.environ, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
-    subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", d, path], capture_output=True, env=env, timeout=600)
+    subprocess.run([soffice, f"-env:UserInstallation={profile}", "--headless", "--convert-to", "pdf", "--outdir", d, path],
+                   capture_output=True, env=env, timeout=600)
     pdfs = glob.glob(os.path.join(d, "*.pdf"))
     return pdfs[0] if pdfs else None
 
@@ -156,12 +189,32 @@ def main():
     if missing:
         sys.exit(f"Thiếu công cụ {', '.join(missing)} (Poppler). Cài Poppler và thêm thư mục bin vào PATH, "
                  "hoặc chép thư mục kết quả sang máy Linux có poppler-utils để chạy verify.py.")
+    if not find_soffice():
+        sys.exit("Không tìm thấy LibreOffice (soffice). Cài LibreOffice (libreoffice.org) hoặc đặt biến "
+                 "NGHIEMTHU_SOFFICE trỏ tới soffice.exe. Cần để kiểm tra file Word mở được và trình bày đúng.")
     S, OUT = Path(a.samples), Path(a.out)
-    rec = json.loads((OUT / "dashboard_record.json").read_text())
+    t_start = time.time()
+    rec = json.loads((OUT / "dashboard_record.json").read_text(encoding="utf-8"))
     api = httpx.Client(base_url=a.base, timeout=120, trust_env=False)
-
-    # ===== Main file: source -> processed -> dashboard -> xlsx/pdf/docx =====
+    ctx = {}
     G = "Đồng bộ"
+    with block(G, "Tầng 1–3: file gốc → dữ liệu xử lý → Dashboard"):
+        check_layers_123(S, rec, api, G, ctx)
+    with block(G, "Tầng 4: Excel"):
+        check_excel(OUT, ctx, G)
+    with block(G, "Tầng 5: PDF"):
+        check_pdf(OUT, ctx, G)
+    with block(G, "Tầng 6: Word"):
+        check_word(OUT, ctx, G)
+    with block(G, "Excel không lọc / toàn bộ sheet / từng bảng"):
+        check_excel_scopes(OUT, ctx, G)
+    with block("Quy tắc Giá", "Quy tắc Giá"):
+        check_price_rule(S, OUT, rec)
+    check_layouts(S, OUT)
+    write_reports(OUT, rec, t_start)
+
+
+def check_layers_123(S, rec, api, G, ctx):
     header, src = source_rows(S / "SoTheoDoi_DoanhThu_2026.xlsx", "Doanh thu 2026", 4)
     check(G, "1. File gốc: đọc độc lập", len(src) == 1200, f"{len(src)} dòng, bỏ dòng 'Tổng cộng'")
     processed = api.get(f"/api/datasets/{rec['datasetIds']['main']}").json()["sheets"][0]
@@ -175,16 +228,17 @@ def main():
     tt, sl = sum(r[8] for r in sel), sum(r[5] for r in sel)
     dg, ck = sum(r[6] for r in sel) / len(sel), sum(r[7] for r in sel) / len(sel)
     exp_kpi = {"Số dòng": len(sel), "Thành tiền": tt, "Số lượng": sl, "Đơn giá (TB)": dg, "Tỷ lệ chiết khấu (TB)": ck}
-    dash = rec["main_filtered"]
-    dk = {k["label"]: k for k in dash["kpis"]}
+    ctx.update(header=header, src=src, sel=sel, sel_sorted=sel_sorted, tt=tt, sl=sl, dg=dg, exp_kpi=exp_kpi, dash=rec["main_filtered"])
+    dk = {k["label"]: k for k in rec["main_filtered"]["kpis"]}
     ok = (parse_vn(dk["Số dòng"]["value"]) == len(sel) and f"= {vn(tt)}" in dk["Thành tiền"]["sub"]
           and parse_vn(dk["Số lượng"]["value"]) == sl and abs(parse_vn(dk["Đơn giá (TB)"]["value"]) - dg) / dg < 0.05
           and parse_vn(dk["Tỷ lệ chiết khấu (TB)"]["value"]) == round(ck, 2))
     check(G, "3. Dashboard == file gốc (lọc Cà Mau, 01/03–30/06/2026)", ok, f"{len(sel)} dòng, Thành tiền {vn(tt)}, Số lượng {sl}")
 
-    # Excel
-    xl = one(OUT, "main_filtered_xlsx__*.xlsx")
-    wb = openpyxl.load_workbook(xl)
+
+def check_excel(OUT, ctx, G):
+    sel, sel_sorted, exp_kpi, dash = ctx["sel"], ctx["sel_sorted"], ctx["exp_kpi"], ctx["dash"]
+    wb = openpyxl.load_workbook(one(OUT, "main_filtered_xlsx__*.xlsx"))
     det = wb["Dữ liệu chi tiết"]
     rows = [list(r) for r in det.iter_rows(min_row=5, values_only=True)]
     check(G, "4a. Excel: chi tiết == file gốc (từng ô, đúng thứ tự sắp xếp)", rows == sel_sorted, f"{len(rows)} dòng")
@@ -208,26 +262,30 @@ def main():
           f"freeze {det.freeze_panes}, filter {det.auto_filter.ref}")
     check("Excel", "Mỗi bảng thống kê có biểu đồ Excel + AutoFilter + Freeze", all(len(wb[n]._charts) == 1 and wb[n].auto_filter.ref and wb[n].freeze_panes == "A5" for n in stats))
 
-    # PDF
+
+def check_pdf(OUT, ctx, G):
+    sel, sel_sorted, dash, tt, sl, dg = ctx["sel"], ctx["sel_sorted"], ctx["dash"], ctx["tt"], ctx["sl"], ctx["dg"]
     pdf = one(OUT, "main_filtered_pdf__*.pdf")
     t = pdf_layout("PDF dài vừa (70 dòng)", pdf)
     missing_rows = [r[0] for r in sel_sorted if not re.search(rf"(?m)^\s*{re.escape(vn(r[0]))}\s+{r[1]:%d/%m/%Y}.*{re.escape(vn(r[8]))}\s*$", t)]
     check(G, "5a. PDF: đủ từng dòng chi tiết (STT, ngày, thành tiền)", not missing_rows, f"thiếu: {missing_rows[:5]}" if missing_rows else f"{len(sel_sorted)} dòng")
     check(G, "5b. PDF: chỉ số + điều kiện lọc", all(s in t for s in (vn(tt), vn(sl), vn(round(dg, 2)), "Cà Mau", "từ 01/03/2026 đến 30/06/2026", f"{len(sel)} / 1.200 dòng")))
-    tn = t.replace("\u00a0", " ")  # pdftotext turns no-break spaces (from Intl compact labels) into spaces
+    tn = t.replace(" ", " ")  # pdftotext turns no-break spaces (from Intl compact labels) into spaces
     miss = [f"{ch['title']}: {r[0]}" for ch in dash["charts"] for r in ch["rows"]
-            if not re.search(re.escape(r[0].replace("\u00a0", " ")[:25]) + r".*\s" + re.escape(vn(parse_vn(r[1]))) + r"(\s|$)", tn)]
+            if not re.search(re.escape(r[0].replace(" ", " ")[:25]) + r".*\s" + re.escape(vn(parse_vn(r[1]))) + r"(\s|$)", tn)]
     check(G, "5c. PDF: mọi bảng thống kê == Dashboard", not miss, f"lệch: {miss[:3]}" if miss else f"{sum(len(c['rows']) for c in dash['charts'])} dòng thống kê")
     check("PDF", "Có ảnh biểu đồ", len(run("pdfimages", "-list", pdf).splitlines()[2:]) >= len(dash["charts"]))
     check("PDF", "Tiếng Việt Unicode trích xuất đúng", "BÁO CÁO DOANH THU DỊCH VỤ KỸ THUẬT 2026" in t and "Người lập báo cáo" in t and "Trần Thị Mai" in t)
     pv = one(OUT, "preview__*.pdf")
+
     def no_time(x):
         return re.sub(r"\d{2}:\d{2}", "", x)
     check("PDF", "Bản xem trước có cùng nội dung với file tải xuống", pv and no_time(run("pdftotext", pv, "-")) == no_time(run("pdftotext", pdf, "-")))
 
-    # Word
-    dfile = one(OUT, "main_filtered_docx__*.docx")
-    d, paras, tables = docx_text(dfile)
+
+def check_word(OUT, ctx, G):
+    header, sel_sorted, exp_kpi, dash = ctx["header"], ctx["sel_sorted"], ctx["exp_kpi"], ctx["dash"]
+    d, paras, tables = docx_text(one(OUT, "main_filtered_docx__*.docx"))
     dt = tables[-1]
     exp = [[vn(r[0]), f"{r[1]:%d/%m/%Y %H:%M}" if r[1].hour else f"{r[1]:%d/%m/%Y}", r[2], r[3], r[4], vn(r[5]), vn(r[6]), vn(r[7]), vn(r[8])] for r in sel_sorted]
     check(G, "6a. Word: chi tiết == file gốc (từng ô)", dt[0] == header and dt[1:] == exp, f"{len(dt) - 1} dòng")
@@ -240,7 +298,9 @@ def main():
     check(G, "6d. Word: điều kiện lọc", any(tb for tb in tables if ["Chi nhánh", "Cà Mau"] in tb))
     check("Word", "Có ảnh biểu đồ, chi tiết in ngang", len(d.inline_shapes) == len(dash["charts"]) and d.sections[-1].page_width > d.sections[-1].page_height)
 
-    # Unfiltered + all sheets + per-chart
+
+def check_excel_scopes(OUT, ctx, G):
+    src = ctx["src"]
     full_rows = [list(r) for r in openpyxl.load_workbook(one(OUT, "main_full_xlsx__*.xlsx"))["Dữ liệu chi tiết"].iter_rows(min_row=5, values_only=True)]
     check(G, "Excel không lọc == toàn bộ file gốc (dòng 'Tổng cộng' không bị cộng trùng)", full_rows == src, f"{len(full_rows)} dòng, tổng {vn(sum(r[8] for r in full_rows))}")
     wa = openpyxl.load_workbook(one(OUT, "main_allsheets_xlsx__*.xlsx"))
@@ -248,7 +308,9 @@ def main():
     wc = openpyxl.load_workbook(one(OUT, "main_chart3_xlsx__*.xlsx"))
     check(G, "Excel theo từng bảng thống kê: chỉ chứa bảng đó", len([s for s in wc.sheetnames if s.startswith("TK")]) == 1 and "Dữ liệu chi tiết" not in wc.sheetnames, wc.sheetnames)
 
-    # ===== "Giá" rule: dashboard == Excel == PDF == Word ======================
+
+def check_price_rule(S, OUT, rec):
+    """'Giá' rule: dashboard == Excel == PDF == Word (rule itself unchanged)."""
     G2 = "Quy tắc Giá"
     ph, ps = source_rows(S / "QuyTac_Gia.xlsx", "Quy tắc Giá", 1)
     col = {n: i for i, n in enumerate(ph)}
@@ -267,45 +329,64 @@ def main():
               okd and abs(px[k["label"]] - expect) < 1e-6 and vn(round(expect, 2)) in ptxt and pword.get(k["label"]) == vn(round(expect, 2)),
               f"giá trị {vn(round(expect, 2))}")
 
-    # ===== Layout of every other PDF / Word =================================
+
+def check_layouts(S, OUT):
     for label, pat in (("PDF ngắn (3 dòng)", "short_pdf__*.pdf"), ("PDF 18 cột", "equipment_pdf__*.pdf"),
                        ("PDF 40 cột, chữ dài", "wide_pdf__*.pdf"), ("PDF quy tắc Giá", "price_pdf__*.pdf"),
                        ("PDF 25.000 dòng lọc Cà Mau", "mid_camau_pdf__*.pdf")):
-        f = one(OUT, pat)
-        if f:
+        with block(label, "Kiểm tra trình bày"):
+            f = one(OUT, pat)
+            if not f:
+                raise FileNotFoundError(f"không có file {pat} (bước tải trong 04 bị lỗi?)")
             pdf_layout(label, f)
-    wide = run("pdftotext", "-layout", one(OUT, "wide_pdf__*.pdf"), "-")
-    w_src_h, w_src = source_rows(S / "RatRong_40Cot.xlsx", "Rất rộng", 1)
-    lost = [r[38] for r in w_src if r[38].replace(" ", "")[:20] not in wide.replace(" ", "").replace("\n", "")]
-    check("PDF 40 cột, chữ dài", "Mã tham chiếu dài 60 ký tự không bị mất", not lost, f"mất {len(lost)}" if lost else f"{len(w_src)} mã")
-    sh = run("pdftotext", "-layout", one(OUT, "short_pdf__*.pdf"), "-")
-    check("PDF ngắn (3 dòng)", "Đủ 3 dòng + tổng", all(x in sh for x in ("Thay ắc quy UPS trạm Hòn Khoai", "Sửa anten VHF kênh 16", "24.550.000")))
+    with block("PDF 40 cột, chữ dài", "Mã tham chiếu dài"):
+        wide = run("pdftotext", "-layout", one(OUT, "wide_pdf__*.pdf"), "-")
+        w_src_h, w_src = source_rows(S / "RatRong_40Cot.xlsx", "Rất rộng", 1)
+        lost = [r[38] for r in w_src if r[38].replace(" ", "")[:20] not in wide.replace(" ", "").replace("\n", "")]
+        check("PDF 40 cột, chữ dài", "Mã tham chiếu dài 60 ký tự không bị mất", not lost, f"mất {len(lost)}" if lost else f"{len(w_src)} mã")
+    with block("PDF ngắn (3 dòng)", "Nội dung"):
+        sh = run("pdftotext", "-layout", one(OUT, "short_pdf__*.pdf"), "-")
+        check("PDF ngắn (3 dòng)", "Đủ 3 dòng + tổng", all(x in sh for x in ("Thay ắc quy UPS trạm Hòn Khoai", "Sửa anten VHF kênh 16", "24.550.000")))
     for label, pat in (("Word ngắn", "short_docx__*.docx"), ("Word 18 cột", "equipment_docx__*.docx"),
                        ("Word 40 cột", "wide_docx__*.docx"), ("Word dài vừa", "main_filtered_docx__*.docx")):
-        f = one(OUT, pat)
-        dd_ = docx.Document(f)
-        widths = [c.width for t in dd_.tables for c in t.columns if c.width]
-        narrow = min(widths) / 360000 if widths else 0
-        check(label, "Mọi cột bảng rộng ≥ 1,2 cm (chữ không bị xuống dòng từng ký tự)", narrow >= 1.2, f"cột hẹp nhất {narrow:.2f} cm")
-        conv = office_to_pdf(f)
-        if conv is None:
-            check(label, "Mở bằng LibreOffice", False, "không chuyển đổi được")
-            continue
-        check(label, "Mở được bằng bộ Office (LibreOffice)", True)
-        pdf_layout(label, conv, margin=1.5 * 72 / 2.54 - 6, expect_footer=False)
+        with block(label, "Kiểm tra trình bày"):
+            f = one(OUT, pat)
+            if not f:
+                raise FileNotFoundError(f"không có file {pat} (bước tải trong 04 bị lỗi?)")
+            dd_ = docx.Document(f)
+            widths = [c.width for t in dd_.tables for c in t.columns if c.width]
+            narrow = min(widths) / 360000 if widths else 0
+            check(label, "Mọi cột bảng rộng ≥ 1,2 cm (chữ không bị xuống dòng từng ký tự)", narrow >= 1.2, f"cột hẹp nhất {narrow:.2f} cm")
+            conv = office_to_pdf(f)
+            if conv is None:
+                check(label, "Mở được bằng bộ Office (LibreOffice)", False, "LibreOffice không chuyển đổi được file")
+                continue
+            check(label, "Mở được bằng bộ Office (LibreOffice)", True)
+            pdf_layout(label, conv, margin=1.5 * 72 / 2.54 - 6, expect_footer=False)
     for label, pat in (("Excel 40 cột", "wide_xlsx__*.xlsx"), ("Excel ngắn", "short_xlsx__*.xlsx"), ("Excel 25.000 dòng", "mid_xlsx__*.xlsx")):
-        f = one(OUT, pat)
-        wbx = openpyxl.load_workbook(f, read_only=True)
-        n = sum(1 for r in wbx["Dữ liệu chi tiết"].iter_rows(min_row=5, values_only=True) if any(v is not None for v in r))
-        check(label, "Mở được, đủ dòng", n > 0, f"{n} dòng")
-    mid_rows = sum(1 for r in openpyxl.load_workbook(one(OUT, "mid_xlsx__*.xlsx"), read_only=True)["Dữ liệu chi tiết"].iter_rows(min_row=5, values_only=True) if r[0] is not None)
-    check("Excel 25.000 dòng", "Đủ 25.000 dòng", mid_rows == 25000, mid_rows)
+        with block(label, "Mở file"):
+            wbx = openpyxl.load_workbook(one(OUT, pat), read_only=True)
+            n = sum(1 for r in wbx["Dữ liệu chi tiết"].iter_rows(min_row=5, values_only=True) if any(v is not None for v in r))
+            check(label, "Mở được, đủ dòng", n > 0, f"{n} dòng")
+    with block("Excel 25.000 dòng", "Đếm dòng"):
+        mid_rows = sum(1 for r in openpyxl.load_workbook(one(OUT, "mid_xlsx__*.xlsx"), read_only=True)["Dữ liệu chi tiết"].iter_rows(min_row=5, values_only=True) if r[0] is not None)
+        check("Excel 25.000 dòng", "Đủ 25.000 dòng", mid_rows == 25000, mid_rows)
 
-    # ===== Report =============================================================
-    ui = json.loads((OUT / "ui_results.json").read_text())
+
+def write_reports(OUT, rec, t_start):
+    ui_file = OUT / "ui_results.json"
+    ui = json.loads(ui_file.read_text(encoding="utf-8")) if ui_file.exists() else []
+    browser = rec.get("browser") or {}
+    passed = sum(r[2] for r in ROWS)
+    (OUT / "verify_results.json").write_text(json.dumps({
+        "finished": datetime.now().isoformat(timespec="seconds"),
+        "seconds": round(time.time() - t_start, 1),
+        "browser": browser, "total": len(ROWS), "passed": passed, "failed": len(ROWS) - passed,
+        "checks": [{"group": g, "name": n, "pass": ok, "detail": d} for g, n, ok, d in ROWS],
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
     lines = ["# Kết quả nghiệm thu xuất báo cáo", "",
-             f"- Trình duyệt: {rec['browser']['name']} {rec['browser']['version']}",
-             f"- User agent: `{rec['browser']['userAgent']}`", f"- Thời điểm: {datetime.now():%d/%m/%Y %H:%M}", "",
+             f"- Trình duyệt: {browser.get('name')} {browser.get('version')}",
+             f"- User agent: `{browser.get('userAgent')}`", f"- Thời điểm: {datetime.now():%d/%m/%Y %H:%M}", "",
              "## A. Kiểm thử giao diện (accept.js)", "", "| Mã | Bài kiểm thử | Kết quả | Chi tiết |", "|---|---|---|---|"]
     lines += [f"| {s['id']} | {s['name']} | {'PASS' if s['pass'] else '**FAIL**'} | {s['detail'].replace('|', '/')[:160]} |" for s in ui]
     lines += ["", "## B. Đối chiếu dữ liệu và kiểm tra file (verify.py)", "", "| Nhóm | Kiểm tra | Kết quả | Chi tiết |", "|---|---|---|---|"]
@@ -314,8 +395,8 @@ def main():
     failed = sum(not s["pass"] for s in ui) + sum(not r[2] for r in ROWS)
     lines += ["", f"**Tổng: {total - failed}/{total} PASS**"]
     (OUT / "acceptance_report.md").write_text("\n".join(lines), encoding="utf-8")
-    print(f"\nVERIFY: {len(ROWS) - sum(not r[2] for r in ROWS)}/{len(ROWS)} PASS — tổng cộng {total - failed}/{total}")
-    sys.exit(1 if failed else 0)
+    print(f"\nVERIFY: {passed}/{len(ROWS)} PASS — tổng cộng {total - failed}/{total}")
+    sys.exit(1 if len(ROWS) - passed else 0)
 
 
 if __name__ == "__main__":

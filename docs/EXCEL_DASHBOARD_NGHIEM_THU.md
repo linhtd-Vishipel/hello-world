@@ -38,6 +38,13 @@ Microsoft Edge trên Windows** (phần chưa thể chạy trong môi trường L
 
 ## 4. Quy trình kiểm thử Microsoft Edge trên Windows
 
+> **Cách nhanh (khuyến nghị):** dùng bộ 6 file BAT trong `tools/acceptance/windows/`
+> (01 kiểm tra môi trường → 06 tổng hợp báo cáo). Hướng dẫn từng bước cho người không chuyên:
+> [HUONG_DAN_NGHIEM_THU_EDGE_WINDOWS.md](HUONG_DAN_NGHIEM_THU_EDGE_WINDOWS.md). Bộ BAT thực hiện
+> đúng các lệnh ở 4.2–4.3 (Web App kiểm thử tự động chạy ở cổng 8765), hướng dẫn và ghi nhận
+> M01–M12 của mục 4.4 (Web App ở cổng 8000), áp dụng tiêu chí 4.5, và lưu mọi kết quả trong
+> `C:\nghiemthu\edge`. Các mục 4.1–4.3 dưới đây là cách chạy thủ công bằng câu lệnh.
+
 ### 4.1 Chuẩn bị (một lần)
 
 1. Cài **Python 3.11+** (python.org, chọn "Add python.exe to PATH") và **Node.js 20+ LTS** (nodejs.org).
