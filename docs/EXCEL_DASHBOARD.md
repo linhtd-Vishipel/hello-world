@@ -57,8 +57,17 @@ Tuỳ chọn:
 - **Người lập**: in trên báo cáo.
 
 Trình duyệt tự tải file về thư mục Tải xuống (Downloads). Tên file có dạng
-`BaoCao_TenBaoCao_YYYYMMDD_HHMM.xlsx|pdf|docx`. Trong khi tạo file, nút hiện
-"⏳ Đang tạo…". Kết quả thành công hoặc lỗi hiện ngay dưới các nút.
+`BaoCao_TenBaoCao_YYYYMMDD_HHMM.xlsx|pdf|docx` (tên báo cáo bỏ dấu, viết liền).
+Trong khi tạo file, nút hiện "⏳ Đang tạo…". Kết quả thành công hoặc lỗi hiện ngay
+dưới các nút.
+
+Sau mỗi lần xuất thành công có nút **⬇ Tải lại <tên file>**. Dùng nút này khi:
+
+- trình duyệt chặn tải tự động (Chrome/Edge chỉ cho tự tải trong vài giây sau cú bấm;
+  báo cáo lớn tạo lâu hơn, hoặc người dùng đã chọn "Chặn" khi được hỏi "tải nhiều file"),
+- lỡ đóng hộp thoại lưu file.
+
+File được giữ trong trình duyệt tới lần xuất kế tiếp.
 
 ### Nguyên tắc dữ liệu
 
@@ -81,21 +90,25 @@ Trình duyệt tự tải file về thư mục Tải xuống (Downloads). Tên f
 | Biểu đồ | Biểu đồ Excel gốc, sửa được | Ảnh biểu đồ | Ảnh biểu đồ |
 | Dữ liệu chi tiết | ✔ không giới hạn dòng | ✔ tối đa 20.000 dòng | ✔ tối đa 5.000 dòng |
 | AutoFilter, cố định hàng tiêu đề, tự giãn cột | ✔ | Lặp tiêu đề bảng mỗi trang | Lặp tiêu đề bảng mỗi trang |
+| Font | Arial (có sẵn trên Windows) | DejaVu Sans nhúng trong file | Arial (có sẵn trên Windows) |
 
-- **PDF**: A4. Phần tổng quan in dọc. Bảng chi tiết trên 6 cột in ngang. Bảng quá rộng
-  được chia thành nhiều phần, mỗi phần lặp lại cột đầu tiên, nên không mất chữ.
-  Có đánh số "Trang x/y".
-- Dữ liệu vượt giới hạn dòng của PDF/Word: máy chủ báo lỗi và gợi ý xuất Excel hoặc
-  lọc bớt, không âm thầm cắt dòng.
+- **PDF/Word**: A4. Phần tổng quan in dọc. Bảng chi tiết trên 6 cột in ngang. Bảng
+  quá rộng được chia thành nhiều phần, mỗi phần lặp lại cột đầu tiên, nên không mất chữ
+  và cột không bị bóp nhỏ (tối thiểu ~1,3 cm). PDF có đánh số "Trang x/y".
+- **Vượt giới hạn dòng của PDF/Word**: không tạo file, không cắt bớt dữ liệu. Thông báo
+  ghi rõ số dòng, giới hạn và cách xử lý (xuất Excel, lọc bớt, hoặc bỏ mục Dữ liệu chi tiết).
+- **Excel** được ghi theo luồng (write-only), nên bộ nhớ máy chủ không tăng theo số ô.
 
-Thời gian tạo file đo trên máy chủ thử nghiệm:
+Đo trên máy chủ thử nghiệm (17/11/2026):
 
-| Trường hợp | Thời gian |
-|---|---|
-| 1.200 dòng, cả 3 định dạng | dưới 1,5 giây |
-| Excel 200.000 dòng | khoảng 25 giây |
-| PDF 20.000 dòng | khoảng 25 giây |
-| Word 5.000 dòng | khoảng 15 giây |
+| Trường hợp | Thời gian | Bộ nhớ đỉnh máy chủ |
+|---|---|---|
+| 1.200 dòng, cả 3 định dạng | dưới 1,5 giây | — |
+| Upload 200.000 dòng (8,6 MB) | khoảng 27 giây | 557 MB (gồm cả bước đọc file) |
+| Excel 200.000 dòng | khoảng 35 giây | không tăng thêm |
+| PDF 20.000 dòng (647 trang) | khoảng 27 giây | 266 MB |
+| Word 5.000 dòng | khoảng 17 giây | 363 MB |
+| Lọc 200.000 dòng trên trình duyệt | dưới 0,2 giây | heap JS ~43 MB |
 
 ## Hệ thống tự nhận diện gì
 
@@ -111,12 +124,31 @@ Thời gian tạo file đo trên máy chủ thử nghiệm:
 
 Dashboard tự sinh gồm:
 
-- **KPI**: số dòng và tổng của các cột chỉ số. Cột kiểu đơn giá hoặc tỷ lệ hiển thị trung bình.
+- **KPI**: số dòng và tổng của các cột chỉ số. Cột kiểu đơn giá hoặc tỷ lệ hiển thị trung
+  bình (xem "Quy tắc tính tổng / trung bình" bên dưới).
 - **Xu hướng** theo ngày, tháng, quý hoặc năm, tự chọn theo độ dài khoảng thời gian.
 - **Cơ cấu** theo từng cột phân loại: 12 nhóm lớn nhất, phần còn lại gộp vào "Khác".
 - **Phân bố** của chỉ số chính.
 
 Mỗi biểu đồ có nút **Bảng** để xem số liệu chi tiết.
+
+### Quy tắc tính tổng / trung bình (hiện hành, chưa thay đổi)
+
+Một cột số được tính **trung bình** (nhãn có hậu tố "(TB)") nếu tên cột chứa một trong
+các cụm sau (không phân biệt hoa thường), ngược lại tính **tổng**:
+
+`%`, `tỷ lệ`, `tỉ lệ`, `ty le`, `rate`, `đơn giá`, `don gia`, `giá`, `gia`, `price`,
+`bình quân`, `trung bình`, `avg`, `average`, `nhiệt độ`, `temp`
+
+Quy tắc nằm ở `excel_dashboard/static/app.js` (`AVG_HINT`, `defaultAgg`). Báo cáo
+Excel/PDF/Word dùng đúng phép tính mà Dashboard đã dùng (trình duyệt gửi kèm), và máy
+chủ tính lại để đối chiếu, nên số liệu luôn thống nhất.
+
+Lưu ý: vì quy tắc so khớp một phần chữ, các tên cột sau cũng bị tính trung bình:
+"Giá trị tài sản", "Giá trị hợp đồng", "Tổng giá trị" (chứa "giá"), "Số lượng giao",
+"Doanh thu giao dịch", "Số người tham gia", "Phí gia hạn" (chứa "gia"), "Separate" (chứa
+"rate"). Đề xuất điều chỉnh đang chờ duyệt, xem
+[EXCEL_DASHBOARD_NGHIEM_THU.md](EXCEL_DASHBOARD_NGHIEM_THU.md#de-xuat-quy-tac-gia).
 
 ## API
 
@@ -140,3 +172,11 @@ Mỗi biểu đồ có nút **Bảng** để xem số liệu chi tiết.
 - Công thức Excel được đọc theo giá trị đã tính lưu trong file. File tạo bằng công cụ
   không lưu giá trị tính toán có thể ra ô trống.
 - Dữ liệu lưu dạng file JSON. Hãy sao lưu thư mục `EXCEL_DASHBOARD_DATA_DIR` định kỳ.
+- Truy cập qua `http://<IP-LAN>`: Chrome/Edge có thể hiện cảnh báo "không thể tải xuống
+  an toàn" với file tải qua HTTP. Nên chạy sau HTTPS nội bộ (hoặc truy cập bằng
+  `localhost`). Xem quy trình kiểm tra trong tài liệu nghiệm thu.
+
+## Nghiệm thu
+
+Bộ kiểm thử tự động và quy trình kiểm thử Microsoft Edge trên Windows:
+[EXCEL_DASHBOARD_NGHIEM_THU.md](EXCEL_DASHBOARD_NGHIEM_THU.md).

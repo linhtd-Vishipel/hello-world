@@ -306,3 +306,31 @@ def test_export_never_writes_formulas(client):
     assert out.status_code == 200, out.text
     cell = openpyxl.load_workbook(io.BytesIO(out.content))["Dữ liệu chi tiết"]["A5"]
     assert cell.value == "=1+1" and cell.data_type == "s"
+
+
+def test_limit_message_is_readable(client, monkeypatch):
+    ds = _upload(client)
+    monkeypatch.setattr(export_module, "DOCX_MAX_DETAIL_ROWS", 1)
+    detail = client.post(f"/api/datasets/{ds}/export/docx", json=_payload()).json()["detail"]
+    assert detail == (
+        "Dữ liệu chi tiết có 2 dòng, vượt giới hạn 1 dòng của file Word. Hệ thống không tự cắt bớt dữ liệu. "
+        "Cách xử lý: xuất Excel (không giới hạn dòng), hoặc lọc bớt dữ liệu, hoặc bỏ chọn mục Dữ liệu chi tiết."
+    )
+
+
+def test_docx_wide_table_is_split_not_squeezed(client):
+    import docx
+
+    header = ["Mã hồ sơ"] + [f"Chỉ tiêu kỹ thuật số {i:02d}" for i in range(1, 40)]
+    lines = [",".join(header)] + [",".join([f"HS-{r:03d}"] + [f"{r * 1000 + c}.25" for c in range(1, 40)]) for r in range(1, 6)]
+    ds = client.post("/api/datasets", files={"file": ("rong.csv", "\n".join(lines).encode())}).json()["id"]
+    res = client.post(f"/api/datasets/{ds}/export/docx", json={"sheet": "CSV", "sections": {"overview": False, "stats": False}})
+    assert res.status_code == 200, res.text
+    d = docx.Document(io.BytesIO(res.content))
+    detail = [t for t in d.tables if t.rows[0].cells[0].text == "Mã hồ sơ"]
+    assert len(detail) > 1  # split into parts, first column repeated
+    seen = {c.text for t in detail for c in t.rows[0].cells}
+    assert seen == set(header)  # no column lost
+    assert all(len(t.rows) == 6 for t in detail)  # no row lost
+    narrowest_cm = min(c.width for t in detail for c in t.columns) / 360000
+    assert narrowest_cm >= 1.2

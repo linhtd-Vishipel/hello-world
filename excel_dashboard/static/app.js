@@ -162,6 +162,8 @@
     } catch (e) { toast("Không mở được: " + e.message); return; }
     state.current.dashboard.charts = state.current.dashboard.charts || {};
     state.sheetIdx = 0;
+    clearManualLink();
+    setStatus("", "");
     try { history.replaceState(null, "", "#" + id); } catch (_) {}
     $("emptyState").hidden = true;
     $("dashboard").hidden = false;
@@ -729,13 +731,26 @@
     return plain ? plain[1] : null;
   }
 
+  // The last generated file stays available through a visible link: browsers
+  // may block an automatic download that starts after a long export (the
+  // user-gesture window has expired) or when several files are downloaded in a
+  // row, and a page cannot detect that. The link is a fresh user click.
+  let lastFile = null; // {url, name}
+  function clearManualLink() {
+    if (lastFile) URL.revokeObjectURL(lastFile.url);
+    lastFile = null;
+    $("exportLink").replaceChildren();
+  }
   function saveBlob(blob, name) {
-    const url = URL.createObjectURL(blob);
-    const a = el("a", { href: url, download: name, style: "display:none" });
+    clearManualLink();
+    lastFile = { url: URL.createObjectURL(blob), name };
+    const a = el("a", { href: lastFile.url, download: name, style: "display:none" });
     document.body.append(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    $("exportLink").replaceChildren(
+      el("a", { class: "btn small", id: "manualDownload", href: lastFile.url, download: name }, `⬇ Tải lại ${name}`),
+      el("span", { class: "muted" }, " Dùng nút này nếu trình duyệt chặn tải tự động hoặc không thấy file trong thư mục Tải xuống."));
   }
 
   function setBusy(busy, label) {
@@ -790,6 +805,7 @@
       setStatus(msg, "ok");
       toast(`Xuất ${FMT_LABEL[fmt]} thành công: ${name}`);
     } catch (e) {
+      clearManualLink();
       setStatus(`❌ Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`, "error");
       toast(`Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`);
     } finally { setBusy(false); }

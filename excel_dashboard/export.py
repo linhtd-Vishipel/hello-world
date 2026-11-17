@@ -242,8 +242,9 @@ def build_report(meta: dict, sheets: list, req: ExportRequest, fmt: str) -> Repo
     limit = {"pdf": PDF_MAX_DETAIL_ROWS, "docx": DOCX_MAX_DETAIL_ROWS}.get(fmt)
     if s.detail and limit and len(rows) > limit:
         raise ExportError(
-            f"Dữ liệu chi tiết có {len(rows):,} dòng, vượt giới hạn {limit:,} dòng của file {fmt.upper()}. "
-            "Hãy xuất Excel (không giới hạn), lọc bớt dữ liệu, hoặc bỏ chọn mục Dữ liệu chi tiết.".replace(",", ".")
+            f"Dữ liệu chi tiết có {fmt_num(len(rows))} dòng, vượt giới hạn {fmt_num(limit)} dòng của file "
+            f"{'PDF' if fmt == 'pdf' else 'Word'}. Hệ thống không tự cắt bớt dữ liệu. Cách xử lý: xuất Excel "
+            "(không giới hạn dòng), hoặc lọc bớt dữ liệu, hoặc bỏ chọn mục Dữ liệu chi tiết."
         )
     return Report(
         title=meta["title"], meta=meta, sheet_name=sheet["name"], author=req.author.strip(),
@@ -342,17 +343,23 @@ def _filter_rows(rep: Report):
 
 
 def to_xlsx(rep: Report) -> bytes:
+    """Write-only (streaming) workbook: memory stays flat for 200,000-row
+    exports. Column widths, freeze panes and page setup are therefore set
+    before each sheet's first row is appended."""
     from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
     from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
-    wb = Workbook()
+    wb = Workbook(write_only=True)
     thin = Side(style="thin", color=BORDER)
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     title_font = Font(name="Arial", size=16, bold=True, color=ACCENT)
     sub_font = Font(name="Arial", size=10, italic=True, color="52514E")
     h2_font = Font(name="Arial", size=12, bold=True, color=ACCENT)
+    bold_font = Font(name="Arial", size=10, bold=True)
+    total_fill = PatternFill("solid", fgColor=ACCENT_LIGHT)
 
     hdr = NamedStyle(name="hdr")
     hdr.font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
@@ -368,36 +375,35 @@ def to_xlsx(rep: Report) -> bytes:
         if fill:
             st.fill = PatternFill("solid", fgColor=fill)
         wb.add_named_style(st)
-    total_font = Font(name="Arial", size=10, bold=True)
-    total_fill = PatternFill("solid", fgColor=ACCENT_LIGHT)
+    tot = NamedStyle(name="total")
+    tot.font = bold_font
+    tot.fill = total_fill
+    tot.border = border
+    wb.add_named_style(tot)
 
-    def clean(v):
-        return ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v
-
-    def put(ws, r, c, v, style=None, fmt=None):
-        cell = ws.cell(row=r, column=c, value=clean(v))
+    def C(ws, v, style=None, fmt=None, font=None):
+        if isinstance(v, str):
+            v = ILLEGAL_CHARACTERS_RE.sub("", v)
+        cell = WriteOnlyCell(ws, value=v)
         if isinstance(v, str) and v.startswith("="):
             cell.data_type = "s"  # never let file content become a formula
         if style:
             cell.style = style
         if fmt:
             cell.number_format = fmt
+        if font:
+            cell.font = font
         return cell
 
-    def title_block(ws, title, subtitle, width):
-        put(ws, 1, 1, title).font = title_font
-        put(ws, 2, 1, subtitle).font = sub_font
-        ws.row_dimensions[1].height = 24
-        if width > 1:
-            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(width, 4))
+    def num_fmt(v):
+        return "#,##0" if v is not None and float(v).is_integer() else "#,##0.00"
 
-    def autosize(ws, widths, min_w=8, max_w=60):
-        for i, w in enumerate(widths, start=1):
-            ws.column_dimensions[get_column_letter(i)].width = max(min_w, min(max_w, w + 2))
+    def as_num(v):
+        return int(v) if v is not None and float(v).is_integer() else v
 
     used_names = set()
 
-    def sheet_name(base):
+    def new_sheet(base, widths, freeze=None, max_w=60):
         base = re.sub(r"[\[\]:*?/\\]", " ", base).strip()[:31] or "Sheet"
         name, n = base, 2
         while name.lower() in used_names:
@@ -405,46 +411,54 @@ def to_xlsx(rep: Report) -> bytes:
             name = base[: 31 - len(suffix)] + suffix
             n += 1
         used_names.add(name.lower())
-        return name
+        ws = wb.create_sheet(name)
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = max(8, min(max_w, w + 2))
+        if freeze:
+            ws.freeze_panes = freeze
+        ws.sheet_view.showGridLines = False
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.paperSize = "9"  # A4
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.print_options.horizontalCentered = True
+        return ws
+
+    def title_rows(ws, title, subtitle, width):
+        ws.append([C(ws, title, font=title_font)])
+        ws.append([C(ws, subtitle, font=sub_font)])
+        ws.append([])
+        if width > 1:
+            ws.merged_cells.add(f"A1:{get_column_letter(max(width, 4))}1")
 
     filt_text = "; ".join(f"{a}: {b}" for a, b in _filter_rows(rep))
     subtitle = f"Lập lúc {rep.generated_at:%d/%m/%Y %H:%M} · {filt_text}"
 
     # ---- Overview -------------------------------------------------------
-    ws = wb.active
-    ws.title = sheet_name("Tổng quan")
-    title_block(ws, f"BÁO CÁO: {rep.title.upper()}", f"Lập lúc {rep.generated_at:%d/%m/%Y %H:%M}", 3)
+    ws = new_sheet("Tổng quan", [28, 40, 40])
+    title_rows(ws, f"BÁO CÁO: {rep.title.upper()}", f"Lập lúc {rep.generated_at:%d/%m/%Y %H:%M}", 3)
     r = 4
-    put(ws, r, 1, "THÔNG TIN BÁO CÁO").font = h2_font
-    r += 1
-    for k, v in _info_rows(rep):
-        put(ws, r, 1, k, "cell").font = total_font
-        put(ws, r, 2, v, "cell")
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=3)
+
+    def kv_block(heading, pairs):
+        nonlocal r
+        ws.append([C(ws, heading, font=h2_font)])
         r += 1
-    r += 1
-    put(ws, r, 1, "ĐIỀU KIỆN LỌC").font = h2_font
-    r += 1
-    for k, v in _filter_rows(rep):
-        put(ws, r, 1, k, "cell").font = total_font
-        put(ws, r, 2, v, "cell")
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=3)
+        for k, v in pairs:
+            ws.append([C(ws, k, "cell", font=bold_font), C(ws, v, "cell"), C(ws, None, "cell")])
+            ws.merged_cells.add(f"B{r}:C{r}")
+            r += 1
+        ws.append([])
         r += 1
+
+    kv_block("THÔNG TIN BÁO CÁO", _info_rows(rep))
+    kv_block("ĐIỀU KIỆN LỌC", _filter_rows(rep))
     if rep.sections.overview and rep.kpis:
-        r += 1
-        put(ws, r, 1, "CHỈ SỐ TỔNG HỢP").font = h2_font
-        r += 1
-        for c, h in enumerate(("Chỉ số", "Giá trị", "Ghi chú"), start=1):
-            put(ws, r, c, h, "hdr")
-        r += 1
+        ws.append([C(ws, "CHỈ SỐ TỔNG HỢP", font=h2_font)])
+        ws.append([C(ws, h, "hdr") for h in ("Chỉ số", "Giá trị", "Ghi chú")])
         for i, k in enumerate(rep.kpis):
             st = "cell_z" if i % 2 else "cell"
-            put(ws, r, 1, k.label, st)
-            v = int(k.value) if k.value is not None and float(k.value).is_integer() else k.value
-            put(ws, r, 2, v, st, "#,##0" if isinstance(v, int) else "#,##0.00")
-            put(ws, r, 3, k.sub, st)
-            r += 1
-    autosize(ws, [28, 40, 40])
+            ws.append([C(ws, k.label, st), C(ws, as_num(k.value), st, num_fmt(k.value)), C(ws, k.sub, st)])
 
     # ---- Stats sheets with native charts ---------------------------------
     if rep.sections.stats:
@@ -454,35 +468,28 @@ def to_xlsx(rep: Report) -> bytes:
         for n, ch in enumerate(rep.charts, start=1):
             if not ch.groups:
                 continue
-            ws = wb.create_sheet(sheet_name(f"TK{n:02d} {ch.title}"))
-            title_block(ws, ch.title, subtitle, 3)
             has_share = any(_share(ch, g) is not None for g in ch.groups)
             heads = [ch.dimension_label, ch.value_label] + (["Tỷ trọng"] if has_share else [])
             hr = 4
-            for c, h in enumerate(heads, start=1):
-                put(ws, hr, c, h, "hdr")
-            r = hr + 1
+            ws = new_sheet(f"TK{n:02d} {ch.title}",
+                           [max(len(heads[0]), *(len(g.label) for g in ch.groups)), max(14, len(heads[1])), 12],
+                           freeze=f"A{hr + 1}")
+            title_rows(ws, ch.title, subtitle, 3)
+            ws.append([C(ws, h, "hdr") for h in heads])
             for i, g in enumerate(ch.groups):
                 st = "cell_z" if i % 2 else "cell"
-                put(ws, r, 1, g.label, st)
-                v = g.value
-                is_int = v is not None and float(v).is_integer()
-                put(ws, r, 2, int(v) if is_int else v, st, "#,##0" if is_int else "#,##0.00")
+                row = [C(ws, g.label, st), C(ws, as_num(g.value), st, num_fmt(g.value))]
                 if has_share:
-                    put(ws, r, 3, _share(ch, g), st, "0.0%")
-                r += 1
-            last = r - 1
+                    row.append(C(ws, _share(ch, g), st, "0.0%"))
+                ws.append(row)
+            last = hr + len(ch.groups)
             total = _stat_total(ch)
             if total is not None:
-                put(ws, r, 1, "Tổng cộng", "cell").font = total_font
-                put(ws, r, 2, total, "cell", "#,##0" if float(total).is_integer() else "#,##0.00").font = total_font
+                row = [C(ws, "Tổng cộng", "total"), C(ws, as_num(total), "total", num_fmt(total))]
                 if has_share:
-                    put(ws, r, 3, 1, "cell", "0.0%").font = total_font
-                for c in range(1, len(heads) + 1):
-                    ws.cell(row=r, column=c).fill = total_fill
-            ws.freeze_panes = ws.cell(row=hr + 1, column=1)
+                    row.append(C(ws, 1, "total", "0.0%"))
+                ws.append(row)
             ws.auto_filter.ref = f"A{hr}:{get_column_letter(len(heads))}{last}"
-            autosize(ws, [max(len(heads[0]), *(len(g.label) for g in ch.groups)), max(14, len(heads[1])), 12])
 
             if ch.type == "doughnut":
                 chart = PieChart()
@@ -497,10 +504,8 @@ def to_xlsx(rep: Report) -> bytes:
             chart.title = ch.title
             chart.width = 18
             chart.height = max(9, min(30, 0.6 * len(ch.groups) + 3)) if ch.type == "hbar" else 9
-            data = Reference(ws, min_col=2, min_row=hr, max_row=last)
-            cats = Reference(ws, min_col=1, min_row=hr + 1, max_row=last)
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(cats)
+            chart.add_data(Reference(ws, min_col=2, min_row=hr, max_row=last), titles_from_data=True)
+            chart.set_categories(Reference(ws, min_col=1, min_row=hr + 1, max_row=last))
             s0 = chart.series[0]
             if ch.type == "doughnut":
                 for i, g in enumerate(ch.groups):
@@ -522,13 +527,7 @@ def to_xlsx(rep: Report) -> bytes:
 
     # ---- Detail data ------------------------------------------------------
     for d in rep.details:
-        name = "Dữ liệu chi tiết" if len(rep.details) == 1 else f"DL {d.name}"
-        ws = wb.create_sheet(sheet_name(name))
         ncol = len(d.columns)
-        title_block(ws, f"DỮ LIỆU CHI TIẾT — {d.name}", f"{subtitle} · {fmt_num(len(d.rows))} dòng", ncol)
-        hr = 4
-        for c, col in enumerate(d.columns, start=1):
-            put(ws, hr, c, col["name"], "hdr")
         fmts, widths = [], []
         for ci, col in enumerate(d.columns):
             vals = [row[ci] for row in d.rows]
@@ -548,28 +547,20 @@ def to_xlsx(rep: Report) -> bytes:
                 fmts.append(None)
                 widths.append(max((len(str(v)) for v in vals[:5000] if v is not None), default=8))
             widths[-1] = max(widths[-1], min(len(col["name"]), 30))
-        r = hr + 1
+        hr = 4
+        ws = new_sheet("Dữ liệu chi tiết" if len(rep.details) == 1 else f"DL {d.name}", widths, freeze=f"A{hr + 1}")
+        title_rows(ws, f"DỮ LIỆU CHI TIẾT — {d.name}", f"{subtitle} · {fmt_num(len(d.rows))} dòng", ncol)
+        ws.row_dimensions[hr].height = 30
+        ws.append([C(ws, col["name"], "hdr") for col in d.columns])
+        is_date = [col["type"] == "date" for col in d.columns]
         for i, row in enumerate(d.rows):
             st = "cell_z" if i % 2 else "cell"
-            for ci, col in enumerate(d.columns):
-                v = row[ci]
-                if v is not None and col["type"] == "date":
-                    v = datetime.fromisoformat(v)
-                put(ws, r, ci + 1, v, st, fmts[ci])
-            r += 1
-        ws.freeze_panes = ws.cell(row=hr + 1, column=1)
-        ws.auto_filter.ref = f"A{hr}:{get_column_letter(ncol)}{max(hr, r - 1)}"
-        ws.row_dimensions[hr].height = 30
-        autosize(ws, widths)
+            ws.append([
+                C(ws, datetime.fromisoformat(v) if (v is not None and is_date[ci]) else v, st, fmts[ci])
+                for ci, v in enumerate(row)
+            ])
+        ws.auto_filter.ref = f"A{hr}:{get_column_letter(ncol)}{hr + max(len(d.rows), 0)}"
 
-    for w in wb.worksheets:
-        w.sheet_view.showGridLines = False
-        w.page_setup.orientation = "landscape"
-        w.page_setup.paperSize = w.PAPERSIZE_A4
-        w.page_setup.fitToWidth = 1
-        w.page_setup.fitToHeight = 0
-        w.sheet_properties.pageSetUpPr.fitToPage = True
-        w.print_options.horizontalCentered = True
     wb.properties.title = f"Báo cáo {rep.title}"
     wb.properties.creator = rep.author or "Excel Dashboard"
     buf = io.BytesIO()
@@ -913,10 +904,19 @@ def to_docx(rep: Report) -> bytes:
         el.set(qn("w:val"), "true")
         trPr.append(el)
 
-    def table(headers, rows, widths=None, numeric=(), total=False, size=9):
+    def table(headers, rows, widths=None, numeric=(), total=False, size=9, fixed=False):
         t = doc.add_table(rows=1, cols=len(headers))
         t.style = "Table Grid"
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
+        if fixed:
+            # Fixed layout: Word/LibreOffice keep the given column widths instead
+            # of squeezing every column to fit (which wraps text per character).
+            t.autofit = False
+            layout = OxmlElement("w:tblLayout")
+            layout.set(qn("w:type"), "fixed")
+            t._tbl.tblPr.append(layout)
+            for i, w in enumerate(widths or []):
+                t.columns[i].width = w
         for i, h in enumerate(headers):
             c = t.rows[0].cells[i]
             set_cell(c, h, bold=True, color="FFFFFF", size=size)
@@ -1006,17 +1006,48 @@ def to_docx(rep: Report) -> bytes:
 
     for d in rep.details:
         cols = d.columns
+        size = 8 if len(cols) <= 10 else 7
+        char_cm = 0.155 if size == 8 else 0.136  # average Arial glyph width
+        texts = [[fmt_cell(r[i], c) for i, c in enumerate(cols)] for r in d.rows]
+        natural = []
+        for i, c in enumerate(cols):
+            head = max((len(w) for w in c["name"].split()), default=4)  # headers wrap on words
+            body = max((len(t[i]) for t in texts[:3000]), default=0)
+            natural.append(max(1.3, min(max(head, body) * char_cm + 0.4, 6.0)))
+        landscape = sum(natural) > 18.0 or len(cols) > 6
+        avail = 26.7 if landscape else 18.0  # page width minus 1.5 cm margins
         sec_d = doc.add_section()
-        if len(cols) > 6:
+        if landscape:
             sec_d.orientation = WD_ORIENT.LANDSCAPE
             sec_d.page_width, sec_d.page_height = Cm(29.7), Cm(21)
         for side in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
             setattr(sec_d, side, Cm(1.5))
         heading(f"Dữ liệu chi tiết ({fmt_num(len(d.rows))} dòng)")
-        size = 8 if len(cols) <= 10 else 7
-        numeric = tuple(i for i, c in enumerate(cols) if c["type"] == "number")
-        table([c["name"] for c in cols], [[fmt_cell(r[i], c) for i, c in enumerate(cols)] for r in d.rows],
-              numeric=numeric, size=size)
+        # Same column-chunking as the PDF: never squeeze columns below a readable
+        # width; split into parts that repeat the first column instead.
+        chunks, cur, cur_w = [], [], 0.0
+        for i in range(len(cols)):
+            if cur and cur_w + natural[i] > avail:
+                chunks.append(cur)
+                cur, cur_w = [0], natural[0]
+            cur.append(i)
+            cur_w += natural[i]
+        chunks.append(cur)
+        for ci, chunk in enumerate(chunks):
+            if len(chunks) > 1:
+                if ci:
+                    doc.add_page_break()
+                names = ", ".join(cols[i]["name"] for i in chunk[1 if ci else 0:])
+                note = doc.add_paragraph()
+                r_ = note.add_run(f"Phần {ci + 1}/{len(chunks)} — các cột: {names}")
+                r_.italic = True
+                r_.font.size = Pt(8)
+            widths = [natural[i] for i in chunk]
+            scale = avail / sum(widths)
+            widths = [Cm(w * scale if scale > 1 else w) for w in widths]
+            numeric = tuple(j for j, i in enumerate(chunk) if cols[i]["type"] == "number")
+            table([cols[i]["name"] for i in chunk], [[t[i] for i in chunk] for t in texts],
+                  widths=widths, numeric=numeric, size=size, fixed=True)
 
     for s in doc.sections:
         fp = s.footer.paragraphs[0]

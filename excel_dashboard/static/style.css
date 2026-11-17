@@ -210,6 +210,8 @@ input[type=text], input[type=search], input[type=date], select {
 .export-status.ok { color: var(--text-primary); }
 .export-status.error { color: var(--danger); font-weight: 600; }
 .export-status.busy { color: var(--text-secondary); }
+.export-link { margin: 6px 0 0; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.export-link:empty { display: none; }
 
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 40; display: flex; padding: 16px; }
 .modal[hidden] { display: none; }
