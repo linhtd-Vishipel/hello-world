@@ -108,9 +108,9 @@ Trạng thái trong báo cáo: **PASS** (đạt), **FAIL** (lỗi thật), **SKI
 
 | Thành phần | Dung lượng (đo thực tế) | Ghi chú |
 |---|---|---|
-| Môi trường ảo Python `C:\nghiemthu\cong_cu\venv` | ~110 MB | tạo **một lần**, các lần chạy sau dùng lại; cài bằng `pip --no-cache-dir` (không lưu bộ nhớ đệm) |
-| `node_modules` (Playwright) trong thư mục mã nguồn | ~18 MB | **không** tải trình duyệt — dùng Edge có sẵn |
-| Kết quả `C:\nghiemthu\edge` (mẫu + 1 lần chạy) | ~250 MB | lần chạy cũ được chuyển vào `lan_chay_truoc\`, **không tự xoá** — anh/chị tự xoá khi không cần |
+| Môi trường ảo Python `C:\nghiemthu\cong_cu\venv` | ~120 MB | tạo **một lần**, các lần chạy sau dùng lại; cài bằng `pip --no-cache-dir` (không lưu bộ nhớ đệm) |
+| `node_modules` (Playwright) trong thư mục mã nguồn | ~19 MB | **không** tải trình duyệt — dùng Edge có sẵn |
+| Kết quả `C:\nghiemthu\edge` (mẫu + 1 lần chạy) | ~100 MB | lần chạy cũ được chuyển vào `lan_chay_truoc\`, **không tự xoá** — anh/chị tự xoá khi không cần |
 
 Bước 01 yêu cầu trống ≥ 3 GB (≥ 2 GB nếu đã cài xong bước 03); bước 02 và 05 kiểm tra lại dung lượng trống
 trước khi tạo/xử lý dữ liệu lớn (200.000 dòng) và dừng lại nếu không đủ.
