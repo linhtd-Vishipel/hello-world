@@ -14,7 +14,7 @@ Microsoft Edge trên Windows** (phần chưa thể chạy trong môi trường L
 | Python / FastAPI | 3.13 / 0.163 |
 | openpyxl / reportlab / python-docx | 3.1.5 / 5.0.1 / 1.2.0 |
 | Node.js / Playwright | 22 / 1.63.0 |
-| Kiểm tra file | poppler 24.02 (pdftotext, pdffonts…), LibreOffice 24.2 |
+| Kiểm tra file | openpyxl, python-docx, `pdfcheck.py` (thư viện chuẩn Python); tùy chọn: poppler 24.02, LibreOffice 24.2 (đối chiếu chéo) |
 
 ## 2. Bộ công cụ kiểm thử (`tools/acceptance/`)
 
@@ -49,10 +49,10 @@ Microsoft Edge trên Windows** (phần chưa thể chạy trong môi trường L
 
 1. Cài **Python 3.11+** (python.org, chọn "Add python.exe to PATH") và **Node.js 20+ LTS** (nodejs.org).
 2. Microsoft Edge có sẵn trên Windows 10/11. Kiểm tra phiên bản tại `edge://settings/help`.
-3. (Tuỳ chọn, để chạy `verify.py` ngay trên Windows) cài **Poppler for Windows**: tải bản
-   phát hành mới nhất của `poppler-windows`, giải nén, thêm thư mục `Library\bin` vào PATH.
-   Nếu không cài, chép thư mục kết quả sang máy Linux có `poppler-utils` để chạy `verify.py`.
-4. (Tuỳ chọn) Cài LibreOffice để `verify.py` mở thử file Word/Excel; hoặc mở bằng Microsoft Office ở bước 4.4.
+3. **Không cần** Poppler hay LibreOffice: `verify.py` kiểm tra PDF bằng `pdfcheck.py` (thư viện chuẩn Python),
+   Excel bằng openpyxl, Word bằng python-docx. Nếu máy có sẵn Poppler/LibreOffice thì `verify.py` chạy thêm
+   phép đối chiếu chéo; nếu không, các mục đó ghi SKIP (không tính là PASS). Trình bày thực tế trong
+   Microsoft Excel/Word vẫn kiểm tra bằng tay ở bước 4.4.
 
 ### 4.2 Khởi động ứng dụng (cửa sổ PowerShell 1)
 

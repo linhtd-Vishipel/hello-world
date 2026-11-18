@@ -20,7 +20,7 @@ File này mở thư mục `C:\nghiemthu\edge` và mở báo cáo nếu đã có;
 
 | Bước | File | Việc máy làm | Thời gian ước tính |
 |---|---|---|---|
-| 01 | `01_KIEM_TRA_MOI_TRUONG.bat` | Kiểm tra Python, Node.js, Edge, Poppler, LibreOffice, thư viện, cổng mạng, ổ đĩa | ~10 giây |
+| 01 | `01_KIEM_TRA_MOI_TRUONG.bat` | Kiểm tra Python ≥ 3.11, Node.js ≥ 20, Edge, thư viện, cổng mạng, ổ đĩa (Poppler/LibreOffice: tùy chọn, không có thì SKIP) | ~10 giây |
 | 02 | `02_TAO_DU_LIEU_MAU.bat` | Tạo 6 file Excel mẫu (3 dòng → 200.000 dòng) | ~1 phút |
 | 03 | `03_CAI_DAT_THU_VIEN.bat` | Cài thư viện Python + Playwright, mở thử Edge | 2–5 phút (cần Internet) |
 | 04 | `04_KIEM_THU_EDGE.bat` | Chạy 42 bài kiểm thử tự động T01–T42 trên Edge | 5–10 phút |
@@ -56,8 +56,8 @@ Về đường dẫn:
 - Thư mục mã nguồn **được phép có dấu cách hoặc dấu tiếng Việt**, nhưng nên **ngắn** (ví dụ `C:\nghiemthu\ma_nguon`).
   Đường dẫn quá dài (như thư mục Downloads lồng nhiều cấp) có thể vượt giới hạn 260 ký tự của Windows
   khi cài thư viện; bước 01 sẽ cảnh báo.
-- Thư mục kết quả `C:\nghiemthu\edge` **không được có dấu tiếng Việt** (Poppler trên Windows không đọc được);
-  bước 01 báo LỖI nếu vi phạm. Tên tài khoản Windows có dấu (ví dụ `C:\Users\Hùng`) không ảnh hưởng.
+- Thư mục kết quả `C:\nghiemthu\edge` **nên không có dấu tiếng Việt** (tránh lỗi với công cụ bên ngoài);
+  bước 01 báo CẢNH BÁO nếu có dấu. Tên tài khoản Windows có dấu (ví dụ `C:\Users\Hùng`) không ảnh hưởng.
 - Không chạy từ ổ mạng (`\\may-chu\...`): chép mã nguồn về ổ đĩa của máy.
 
 ### 1.2 Cài Python 3.12 hoặc 3.13 (khuyến nghị)
@@ -82,27 +82,38 @@ khi đó cài thêm Python 3.13.
 
 Edge có sẵn trên Windows 10/11. Mở Edge, vào địa chỉ `edge://settings/help` để cập nhật bản mới nhất.
 
-### 1.5 Cài Poppler (bắt buộc — dùng để đọc và kiểm tra file PDF)
+### 1.5 Poppler và LibreOffice — KHÔNG bắt buộc, KHÔNG cần cài
 
-1. Mở `https://github.com/oschwartz10612/poppler-windows/releases`.
-2. Ở bản phát hành mới nhất (trên cùng), mục **Assets**, tải file `Release-<phiên bản>.zip`.
-3. Chuột phải file ZIP → Properties → Unblock → OK.
-4. Giải nén vào **`C:\nghiemthu\cong_cu\poppler`**.
-5. Kiểm tra: phải có file theo dạng
-   `C:\nghiemthu\cong_cu\poppler\poppler-<phiên bản>\Library\bin\pdftotext.exe`.
+Bộ nghiệm thu **không yêu cầu, không tự tải và không tự cài** Poppler hay LibreOffice. Các file xuất được
+kiểm tra bằng thư viện đã có trong bộ công cụ:
 
-Không cần sửa PATH: bước 01 tự tìm Poppler trong `C:\nghiemthu\cong_cu\poppler`.
-Nếu anh/chị giải nén vào nơi khác, đặt biến môi trường trước khi chạy BAT (Command Prompt):
-`setx POPPLER_BIN "D:\duong_dan\Library\bin"` rồi mở lại file BAT.
+| File | Công cụ kiểm tra (bắt buộc, có sẵn) | Nội dung kiểm tra |
+|---|---|---|
+| Excel (.xlsx) | `openpyxl` + đọc gói ZIP/XML | mở được, gói ZIP/XML hợp lệ, tên sheet, số dòng/cột, tiêu đề cột, định dạng số và ngày tháng, tổng cộng so với Dashboard, dữ liệu sau xuất == file gốc |
+| PDF | `pdfcheck.py` (thư viện chuẩn Python) | file tồn tại, dung lượng, header/cấu trúc PDF, số trang, khổ A4, trích xuất chữ, tiếng Việt, trang trắng, tiêu đề mồ côi cuối trang, chữ tràn lề, số trang "Trang i/n", font nhúng, ảnh biểu đồ |
+| Word (.docx) | `python-docx` + đọc gói ZIP/XML | mở được, ZIP/XML hợp lệ, liên kết nội bộ, tiêu đề, nội dung, bảng vừa khổ giấy, dòng tiêu đề bảng lặp lại, độ rộng cột tối thiểu, font, tiếng Việt, số liệu thống kê == Dashboard, không thiếu mục |
 
-**Bộ công cụ không bỏ qua khi thiếu Poppler**: bước 01 báo LỖI và bước 05 dừng lại cho tới khi cài xong.
+Nếu máy **đã có sẵn** Poppler hoặc LibreOffice, bộ công cụ dùng thêm để đối chiếu chéo (so chữ PDF với
+`pdftotext`; dựng trang thử file Word). Nếu không có, các mục đó ghi **SKIP**:
 
-### 1.6 Cài LibreOffice (bắt buộc — dùng để mở thử file Word/Excel)
+- **SKIP không bao giờ được tính là PASS** và được ghi riêng một cột trong báo cáo;
+- SKIP không làm bước 01 hay kết luận bị LỖI, vì phép kiểm tra bắt buộc tương ứng đã chạy bằng thư viện có sẵn;
+- Việc dựng trang thực tế của file Word (ngắt trang, trình bày) không kiểm tra tự động được khi không có
+  LibreOffice — nội dung này do bài thủ công **M04** (mở bằng Microsoft Word) đảm nhận, vẫn bắt buộc.
 
-1. Mở `https://www.libreoffice.org/download/`, tải bản **Windows x86-64**.
-2. Cài với các lựa chọn mặc định (vào `C:\Program Files\LibreOffice`).
+Trạng thái trong báo cáo: **PASS** (đạt), **FAIL** (lỗi thật), **SKIP** (công cụ tùy chọn không có),
+**CHƯA KIỂM THỬ** (NOT TESTED — bài chưa chạy; còn bài này thì kết luận luôn là KHÔNG ĐẠT).
 
-Nếu cài vào thư mục khác: `setx NGHIEMTHU_SOFFICE "D:\LibreOffice\program\soffice.exe"`.
+### 1.6 Dung lượng ổ đĩa
+
+| Thành phần | Dung lượng (đo thực tế) | Ghi chú |
+|---|---|---|
+| Môi trường ảo Python `C:\nghiemthu\cong_cu\venv` | ~110 MB | tạo **một lần**, các lần chạy sau dùng lại; cài bằng `pip --no-cache-dir` (không lưu bộ nhớ đệm) |
+| `node_modules` (Playwright) trong thư mục mã nguồn | ~18 MB | **không** tải trình duyệt — dùng Edge có sẵn |
+| Kết quả `C:\nghiemthu\edge` (mẫu + 1 lần chạy) | ~250 MB | lần chạy cũ được chuyển vào `lan_chay_truoc\`, **không tự xoá** — anh/chị tự xoá khi không cần |
+
+Bước 01 yêu cầu trống ≥ 3 GB (≥ 2 GB nếu đã cài xong bước 03); bước 02 và 05 kiểm tra lại dung lượng trống
+trước khi tạo/xử lý dữ liệu lớn (200.000 dòng) và dừng lại nếu không đủ.
 
 ### 1.7 Đóng các chương trình dùng cổng 8000 và 8765
 
@@ -250,8 +261,8 @@ Mỗi file BAT in `ma thoat` khi chưa đạt và trả đúng mã thoát của 
 | `NGHIEMTHU_DIR` | `C:\nghiemthu\edge` | Muốn lưu kết quả ở thư mục khác (không dấu tiếng Việt) |
 | `NGHIEMTHU_CONG_CU` | `C:\nghiemthu\cong_cu` | Muốn đặt môi trường Python riêng ở nơi khác |
 | `NGHIEMTHU_PORT` | `8765` | Cổng 8765 bị chương trình khác chiếm (cổng 8000 của bước 06 cố định theo tài liệu M07/M09) |
-| `POPPLER_BIN` | tự tìm | Poppler giải nén ngoài `C:\nghiemthu\cong_cu\poppler` |
-| `NGHIEMTHU_SOFFICE` | tự tìm | LibreOffice cài ngoài `C:\Program Files\LibreOffice` |
+| `POPPLER_BIN` | tự tìm | (Tùy chọn) Máy đã có Poppler ở thư mục lạ, muốn dùng thêm để đối chiếu chéo |
+| `NGHIEMTHU_SOFFICE` | tự tìm | (Tùy chọn) Máy đã có LibreOffice ở thư mục lạ, muốn dùng thêm để dựng trang Word |
 
 Gửi kết quả: chuột phải thư mục `C:\nghiemthu\edge` → **Send to → Compressed (zipped) folder**.
 
@@ -265,8 +276,8 @@ Gửi kết quả: chuột phải thư mục `C:\nghiemthu\edge` → **Send to �
 | `[LOI] Chi tim thay Python cu hon 3.11: ...` | Máy chỉ có Python cũ (ví dụ 3.9, 3.10). Cài thêm Python 3.12 hoặc 3.13 (mục 1.2) — không cần gỡ bản cũ — rồi mở lại file BAT |
 | Mở BAT hiện "Windows protected your PC" | Bấm **More info → Run anyway**; lần sau nhớ Unblock file ZIP trước khi giải nén (mục 1.1) |
 | `[LỖI] Node.js` / `npm` không tìm thấy | Cài Node.js (mục 1.3), mở lại file BAT |
-| `[LỖI] Poppler ... không tìm thấy` | Làm mục 1.5, kiểm tra đúng có file `...\Library\bin\pdftotext.exe` |
-| `[LỖI] LibreOffice ... không tìm thấy` | Làm mục 1.6 |
+| `[SKIP] Poppler` / `[SKIP] LibreOffice` ở bước 01 | Bình thường — công cụ tùy chọn, **không cần cài** (mục 1.5) |
+| `Ổ đĩa chỉ còn trống ... GB` | Giải phóng ổ đĩa (không xoá dữ liệu gốc) hoặc đặt `NGHIEMTHU_DIR` sang ổ khác, rồi chạy lại bước đó |
 | `Cổng 8765/8000 đang bị chương trình khác dùng` | Đóng cửa sổ kiểm thử cũ hoặc Web App đang chạy; hoặc khởi động lại máy |
 | `pip install thất bại` / `npm ci thất bại` ở bước 03 | Kiểm tra Internet. Mạng công ty có proxy: hỏi bộ phận IT địa chỉ proxy, chạy trong Command Prompt: `setx HTTPS_PROXY http://proxy.congty:8080` và `npm config set proxy http://proxy.congty:8080` và `npm config set https-proxy http://proxy.congty:8080`, rồi mở lại file 03 |
 | `Playwright không mở được trình duyệt` | Cập nhật Edge (`edge://settings/help`), khởi động lại máy, chạy lại 03 |
@@ -280,7 +291,8 @@ Khi cần hỗ trợ: gửi thư mục `C:\nghiemthu\edge\logs` (hoặc cả th�
 ## 6. Phạm vi đã kiểm tra trước khi bàn giao (minh bạch)
 
 - Toàn bộ logic của bộ công cụ nằm trong `tools/acceptance/nghiemthu.py`; đã **chạy thật** đủ
-  6 bước trên Linux (Chrome 153 thay cho Edge) gồm cả các tình huống lỗi: thiếu Poppler/LibreOffice,
+  6 bước trên Linux (Chrome 153 thay cho Edge) gồm cả các tình huống lỗi; máy không có
+  Poppler/LibreOffice (bước 01 ĐẠT, các mục phụ ghi SKIP),
   thiếu Edge, bài kiểm thử FAIL giữa chừng (ảnh chụp lỗi, báo cáo KHÔNG ĐẠT), nhập M01–M12 tương tác,
   Web App cổng 8000 truy cập được qua mạng LAN.
 - Các file BAT được kiểm tra tự động (định dạng CRLF, chỉ ký tự ASCII, nhãn `goto`, lệnh gọi,

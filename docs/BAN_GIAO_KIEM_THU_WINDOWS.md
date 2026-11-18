@@ -38,7 +38,13 @@ python-multipart, reportlab, python-docx), `.gitignore`. Mọi file khác là fi
 | 157 kiểm thử tự động (pytest), mô phỏng đúng CI: Python 3.11 + `requirements.txt` | Đạt trên **Linux** |
 | Bộ nghiệm thu đủ 6 bước, kể cả các tình huống lỗi | Đạt trên **Linux, Chrome 153 thay cho Edge** |
 | 9 file BAT | **Chỉ kiểm tra tĩnh** (cú pháp, nhãn, ký tự đặc biệt, CRLF) — **chưa chạy bằng Windows CMD** |
+| Bộ nghiệm thu trên máy **không có Poppler và LibreOffice** (bước 01 ĐẠT, các mục phụ ghi SKIP) | Đạt trên **Linux, Chrome 153 thay cho Edge** |
 | Microsoft Edge, Microsoft Excel/Word, M01–M12 | **Chưa kiểm thử** — là nội dung của đợt nghiệm thu này |
+
+Máy nghiệm thu **không cần cài Poppler hay LibreOffice**. PDF được kiểm tra bằng `tools/acceptance/pdfcheck.py`
+(thư viện chuẩn Python, cho kết quả trùng khớp Poppler trên toàn bộ PDF của Web App), Excel bằng openpyxl,
+Word bằng python-docx. Báo cáo có 4 trạng thái: PASS, FAIL, SKIP (công cụ tùy chọn không có — **không tính là
+PASS**), CHƯA KIỂM THỬ (NOT TESTED).
 
 Kết quả trên Linux **không** được dùng làm căn cứ nghiệm thu Windows. Báo cáo của bộ công cụ cũng không thể kết luận
 ĐẠT nếu kiểm thử tự động không chạy trên Microsoft Edge.
@@ -67,7 +73,7 @@ Tất cả điều kiện phải đạt; chỉ cần một điều kiện không
 | Mã | Điều kiện | Cách kiểm |
 |---|---|---|
 | G1 | Báo cáo kết luận **ĐẠT** | `ket_qua_tong_hop.json`: `ket_luan = "ĐẠT"` |
-| G2 | **0 FAIL, 0 CHƯA KIỂM THỬ** ở cả 4 nhóm (A 42 bài, B đối chiếu, C 16 bài, D 12 bài M01–M12) | `fail = 0`, `chua = 0` |
+| G2 | **0 FAIL, 0 CHƯA KIỂM THỬ** ở cả 4 nhóm (A 42 bài, B đối chiếu, C 16 bài, D 12 bài M01–M12). Mục SKIP được ghi nhận riêng, không tính là PASS | `fail = 0`, `chua = 0` (số SKIP ở `skip`) |
 | G3 | Chạy trên **Microsoft Edge** qua kênh `msedge` | `trinh_duyet.launch.channel = "msedge"` |
 | G4 | Chạy trên **Windows 10 hoặc 11**, bước 01 không có lỗi môi trường | `he_dieu_hanh`, `loi_moi_truong = []` |
 | G5 | Đúng phiên bản bàn giao | `dau_van_tay` bắt đầu bằng `abc875e5259e` |
@@ -101,7 +107,7 @@ Web App cần được cài/khởi động trên máy chủ theo `docs/EXCEL_DAS
 | Phiên bản Python (dòng `Python: ...` đầu mỗi bước) | |
 | Dấu vân tay trong báo cáo | |
 | Kết luận trong báo cáo (ĐẠT / KHÔNG ĐẠT) | |
-| Tổng số bài / PASS / FAIL / CHƯA KIỂM THỬ | |
+| Tổng số bài / PASS / FAIL / CHƯA KIỂM THỬ / SKIP | |
 | M01–M12: các bài FAIL hoặc ghi chú (nếu có) | |
 | Microsoft Excel mở file xuất được (M02) | Có / Không |
 | Microsoft Word mở file xuất được (M04) | Có / Không |

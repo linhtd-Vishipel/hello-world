@@ -17,10 +17,15 @@ Cấu hình qua biến môi trường (không bắt buộc):
     NGHIEMTHU_DIR      thư mục kết quả        (mặc định C:\\nghiemthu\\edge)
     NGHIEMTHU_CONG_CU  thư mục công cụ (venv) (mặc định C:\\nghiemthu\\cong_cu)
     NGHIEMTHU_PORT     cổng máy chủ thử       (mặc định 8765)
-    POPPLER_BIN        thư mục bin của Poppler
-    NGHIEMTHU_SOFFICE  đường dẫn soffice.exe của LibreOffice
+    POPPLER_BIN        (tùy chọn) thư mục bin của Poppler — KHÔNG bắt buộc
+    NGHIEMTHU_SOFFICE  (tùy chọn) đường dẫn soffice.exe của LibreOffice — KHÔNG bắt buộc
     NGHIEMTHU_BROWSER  msedge (mặc định). Giá trị khác chỉ dùng để thử bộ công cụ,
     NGHIEMTHU_EXE      báo cáo khi đó luôn ghi "không hợp lệ cho nghiệm thu Edge".
+
+Poppler và LibreOffice là công cụ TÙY CHỌN: PDF được kiểm tra bằng pdfcheck.py
+(thư viện chuẩn Python), Excel bằng openpyxl, Word bằng python-docx. Nếu máy có sẵn
+Poppler/LibreOffice thì chạy thêm phép đối chiếu chéo; nếu không có, các mục đó ghi
+SKIP — SKIP không bao giờ được tính là PASS.
 """
 import argparse
 import html
@@ -80,17 +85,11 @@ HUONG_DAN = {
     "node": "Cài Node.js bản LTS (20 trở lên) từ https://nodejs.org/ (file .msi, chọn mặc định). "
             "Cài xong đóng cửa sổ này và mở lại file BAT.",
     "edge": "Cài/cập nhật Microsoft Edge từ https://www.microsoft.com/edge, rồi mở edge://settings/help để cập nhật.",
-    "poppler": "Poppler dùng để đọc và kiểm tra file PDF. Cách cài:\n"
-               "  1. Mở https://github.com/oschwartz10612/poppler-windows/releases\n"
-               "  2. Ở bản phát hành mới nhất, tải file Release-<phiên bản>.zip\n"
-               "  3. Giải nén vào thư mục C:\\nghiemthu\\cong_cu\\poppler\n"
-               "     (sau khi giải nén phải có file ...\\poppler\\poppler-<phiên bản>\\Library\\bin\\pdftotext.exe)\n"
-               "  4. Chạy lại 01_KIEM_TRA_MOI_TRUONG.bat — bộ công cụ tự tìm Poppler trong thư mục này.\n"
-               "  (Hoặc đặt biến môi trường POPPLER_BIN trỏ tới thư mục chứa pdftotext.exe.)",
-    "libreoffice": "LibreOffice dùng để mở thử file Word/Excel và kiểm tra trình bày. Cài từ "
-                   "https://www.libreoffice.org/download/ (bản Windows x86-64, chọn mặc định). "
-                   "Nếu cài vào thư mục khác C:\\Program Files\\LibreOffice, đặt biến NGHIEMTHU_SOFFICE "
-                   "trỏ tới soffice.exe.",
+    "poppler": "KHÔNG bắt buộc, KHÔNG cần cài. File PDF đã được kiểm tra đầy đủ bằng pdfcheck.py (thư viện chuẩn "
+               "Python). Nếu máy đã có sẵn Poppler, bộ công cụ chạy thêm phép đối chiếu chéo; nếu không, mục đó ghi SKIP.",
+    "libreoffice": "KHÔNG bắt buộc, KHÔNG cần cài. File Word/Excel đã được kiểm tra bằng python-docx/openpyxl. "
+                   "Nếu máy đã có sẵn LibreOffice, bộ công cụ dựng trang thử file Word; nếu không, các mục đó ghi SKIP "
+                   "(việc xem trình bày thực tế do bài thủ công M04 bằng Microsoft Word đảm nhận).",
     "thu_vien": "Chạy 03_CAI_DAT_THU_VIEN.bat.",
     "mau": "Chạy 02_TAO_DU_LIEU_MAU.bat.",
 }
@@ -311,6 +310,44 @@ def find_soffice():
     return next((c for c in cands if c and os.path.isfile(c)), None)
 
 
+MIN_FREE_GB = 2.0   # dữ liệu mẫu (~60 MB) + kết quả 04/05 (~150 MB) + file tạm khi xuất 200.000 dòng, có dư
+INSTALL_GB = 1.0    # môi trường ảo Python (~150 MB) + node_modules Playwright (~15 MB, không tải trình duyệt), có dư
+
+
+def free_gb(path):
+    p = Path(path)
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    return shutil.disk_usage(p).free / 1024 ** 3
+
+
+def dir_mb(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(root, f)).st_size
+            except OSError:
+                pass
+    return total / 1024 ** 2
+
+
+def disk_used():
+    """Dung lượng thực tế bộ nghiệm thu đang dùng (MB). Chỉ đọc, không xoá gì."""
+    return {"môi trường ảo Python": dir_mb(VENV), "node_modules (Playwright)": dir_mb(ACC / "node_modules"),
+            "kết quả nghiệm thu": dir_mb(EDGE_DIR)}
+
+
+def disk_ok(log, need_gb, what):
+    gb = free_gb(EDGE_DIR)
+    if gb < need_gb:
+        log.line(f"[LỖI] Ổ đĩa chỉ còn trống {gb:.1f} GB, cần ít nhất {need_gb:g} GB để {what}. "
+                 "Giải phóng ổ đĩa (KHÔNG xoá dữ liệu gốc) hoặc đặt NGHIEMTHU_DIR sang ổ khác, rồi chạy lại.")
+        return False
+    log.line(f"    Dung lượng trống: {gb:.1f} GB (cần ≥ {need_gb:g} GB) — đủ.")
+    return True
+
+
 def venv_modules():
     """(đủ?, chi tiết) cho các thư viện Python trong môi trường ảo."""
     if not VPY.is_file():
@@ -430,13 +467,19 @@ def env_items():
             "" if label == "Microsoft Edge" else "Chế độ thử bộ công cụ: kết quả không dùng để nghiệm thu Edge.")
     else:
         add(label, "FAIL", "không tìm thấy", HUONG_DAN["edge"])
+    add("Bộ đọc PDF tích hợp (pdfcheck.py, thư viện chuẩn Python)", "PASS" if (ACC / "pdfcheck.py").is_file() else "FAIL",
+        str(ACC / "pdfcheck.py"), "" if (ACC / "pdfcheck.py").is_file() else "Tải lại mã nguồn đúng nhánh.")
     pb = find_poppler()
     pv = poppler_version(pb) if pb else None
-    add("Poppler (pdftotext, pdfinfo, pdffonts, pdfimages)", "PASS" if pb and pv else "FAIL",
-        f"phiên bản {pv} — {pb}" if pb and pv else (f"có thư mục {pb} nhưng không chạy được pdftotext" if pb else "không tìm thấy"),
+    add("Poppler — TÙY CHỌN, không bắt buộc", "PASS" if pb and pv else "SKIP",
+        f"có sẵn: phiên bản {pv} — {pb} (dùng để đối chiếu chéo PDF)" if pb and pv
+        else "không có — bỏ qua đối chiếu chéo PDF (SKIP); PDF vẫn được kiểm tra đầy đủ bằng pdfcheck.py",
         "" if pb and pv else HUONG_DAN["poppler"])
     so = find_soffice()
-    add("LibreOffice (soffice)", "PASS" if so else "FAIL", so or "không tìm thấy", "" if so else HUONG_DAN["libreoffice"])
+    add("LibreOffice — TÙY CHỌN, không bắt buộc", "PASS" if so else "SKIP",
+        f"có sẵn: {so} (dùng để dựng trang thử file Word)" if so
+        else "không có — bỏ qua dựng trang Word bằng LibreOffice (SKIP); Word/Excel vẫn được kiểm tra bằng python-docx/openpyxl",
+        "" if so else HUONG_DAN["libreoffice"])
     must = ["requirements.txt", "excel_dashboard/main.py", "excel_dashboard/export.py", "tools/acceptance/accept.js",
             "tools/acceptance/verify.py", "tools/acceptance/make_samples.py", "tools/acceptance/large_data.py",
             "tools/acceptance/package.json", "tools/acceptance/package-lock.json", "tools/acceptance/requirements-nghiemthu.txt",
@@ -449,9 +492,9 @@ def env_items():
         "Đường dẫn dài, có thể vượt giới hạn 260 ký tự của Windows khi cài node_modules. Nên đặt mã nguồn ở "
         "C:\\nghiemthu\\ma_nguon." if long_root else "")
     ascii_out = str(EDGE_DIR).isascii()
-    add("Thư mục kết quả không có dấu tiếng Việt", "PASS" if ascii_out else "FAIL", str(EDGE_DIR),
-        "" if ascii_out else "Poppler trên Windows không đọc được đường dẫn có dấu. Dùng thư mục mặc định "
-        "C:\\nghiemthu\\edge (xoá biến NGHIEMTHU_DIR) hoặc một đường dẫn không dấu.")
+    add("Thư mục kết quả không có dấu tiếng Việt", "PASS" if ascii_out else "CẢNH BÁO", str(EDGE_DIR),
+        "" if ascii_out else "Nên dùng thư mục mặc định C:\\nghiemthu\\edge (xoá biến NGHIEMTHU_DIR) hoặc một đường dẫn "
+        "không dấu để tránh lỗi với công cụ bên ngoài.")
     try:
         manual = manual_items()
         add("Danh mục M01–M12 trong tài liệu nghiệm thu", "PASS" if len(manual) == 12 else "FAIL", f"đọc được {len(manual)} mục từ {DOC.name}")
@@ -481,19 +524,23 @@ def env_items():
         probe = EDGE_DIR / ".kiem_tra_ghi"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
-        gb = shutil.disk_usage(EDGE_DIR).free / 1024 ** 3
-        add("Quyền ghi + dung lượng trống ≥ 3 GB", "PASS" if gb >= 3 else "FAIL", f"{EDGE_DIR} — trống {gb:.1f} GB",
-            "" if gb >= 3 else "Giải phóng ổ đĩa hoặc đặt NGHIEMTHU_DIR sang ổ khác.")
+        gb = free_gb(EDGE_DIR)
+        need = MIN_FREE_GB + (0 if INSTALL_MARKER.is_file() else INSTALL_GB)
+        add(f"Quyền ghi + dung lượng trống ≥ {need:g} GB", "PASS" if gb >= need else "FAIL", f"{EDGE_DIR} — trống {gb:.1f} GB",
+            "" if gb >= need else "Giải phóng ổ đĩa (KHÔNG xoá dữ liệu gốc) hoặc đặt NGHIEMTHU_DIR sang ổ khác.")
     except OSError as exc:
-        add("Quyền ghi + dung lượng trống ≥ 3 GB", "FAIL", f"không ghi được vào {EDGE_DIR}: {exc}",
+        add(f"Quyền ghi + dung lượng trống ≥ {MIN_FREE_GB:g} GB", "FAIL", f"không ghi được vào {EDGE_DIR}: {exc}",
             "Chạy lại bằng tài khoản có quyền tạo thư mục C:\\nghiemthu, hoặc đặt NGHIEMTHU_DIR.")
+    used = disk_used()
+    add("Dung lượng bộ nghiệm thu đang dùng", "PASS",
+        "; ".join(f"{k}: {v:,.0f} MB".replace(",", ".") for k, v in used.items()) + f" — tổng {sum(used.values()):,.0f} MB".replace(",", "."))
     return items
 
 
 def cmd_kiem_tra(log):
     items = env_items()
     for it in items:
-        mark = {"PASS": "[ OK ]", "FAIL": "[LỖI]", "CẦN CÀI": "[CẦN]", "CẢNH BÁO": "[ ! ]"}[it["trang_thai"]]
+        mark = {"PASS": "[ OK ]", "FAIL": "[LỖI]", "CẦN CÀI": "[CẦN]", "CẢNH BÁO": "[ ! ]", "SKIP": "[SKIP]"}[it["trang_thai"]]
         log.line(f"{mark} {it['ten']}: {it['chi_tiet']}")
         if it["huong_dan"]:
             for g in it["huong_dan"].splitlines():
@@ -506,8 +553,12 @@ def cmd_kiem_tra(log):
     if fails:
         log.line(f"KẾT LUẬN: CHƯA ĐẠT — {len(fails)} mục LỖI. Làm theo hướng dẫn (→) rồi chạy lại 01.")
         return 1
+    skips = [i for i in items if i["trang_thai"] == "SKIP"]
+    if skips:
+        log.line("Công cụ TÙY CHỌN không có (không ảnh hưởng kết luận, KHÔNG cần cài): "
+                 + ", ".join(i["ten"].split(" —")[0] for i in skips) + ". Các phép kiểm tra phụ tương ứng sẽ ghi SKIP.")
     if need:
-        log.line("KẾT LUẬN: Công cụ hệ thống đã đủ. Các mục [CẦN] sẽ được xử lý ở bước 02 và 03.")
+        log.line("KẾT LUẬN: ĐẠT — công cụ bắt buộc đã đủ. Các mục [CẦN] sẽ được xử lý ở bước 02 và 03.")
     else:
         log.line("KẾT LUẬN: ĐẠT — môi trường sẵn sàng.")
     return 0
@@ -532,9 +583,11 @@ def cmd_tao_du_lieu(log):
         return 1
     if capture([VPY, "-c", "import openpyxl"])[0] != 0:
         log.line("    Cài thư viện openpyxl (cần để tạo file Excel mẫu) ...")
-        if log.run([VPY, "-m", "pip", "install", "--disable-pip-version-check", "openpyxl>=3.1"]) != 0:
+        if log.run([VPY, "-m", "pip", "install", "--disable-pip-version-check", "--no-cache-dir", "openpyxl>=3.1"]) != 0:
             log.line("[LỖI] Không cài được openpyxl. Kiểm tra kết nối Internet/proxy rồi chạy lại.")
             return 1
+    if not disk_ok(log, MIN_FREE_GB, "tạo dữ liệu mẫu (có file 200.000 dòng)"):
+        return 1
     archive(DIRS["mau"], log)  # không ghi đè: bộ mẫu cũ (nếu có) được chuyển vào lan_chay_truoc
     log.line(f"    Tạo 6 file Excel mẫu vào {DIRS['mau']} (khoảng 20–60 giây) ...")
     code = log.run([VPY, ACC / "make_samples.py", DIRS["mau"], "--big-rows", "200000"], timeout=1800)
@@ -549,11 +602,14 @@ def cmd_tao_du_lieu(log):
 def cmd_cai_dat(log):
     if INSTALL_MARKER.exists():
         INSTALL_MARKER.unlink()  # chỉ đánh dấu lại khi lần cài này thành công trọn vẹn
+    if not disk_ok(log, INSTALL_GB, "cài thư viện"):
+        return 1
     if not ensure_venv(log):
         log.line("[LỖI] Không tạo được môi trường Python. " + HUONG_DAN["python"])
         return 1
+    log.line("    Dùng lại môi trường ảo sẵn có, không tải lại thư viện đã cài, không lưu bộ nhớ đệm pip (--no-cache-dir).")
     log.line("1) Cài thư viện Python cho Web App và bộ kiểm thử ...")
-    code = log.run([VPY, "-m", "pip", "install", "--disable-pip-version-check", "-r", ROOT / "requirements.txt",
+    code = log.run([VPY, "-m", "pip", "install", "--disable-pip-version-check", "--no-cache-dir", "-r", ROOT / "requirements.txt",
                     "-r", ACC / "requirements-nghiemthu.txt"], timeout=1800)
     if code:
         log.line("[LỖI] pip install thất bại. Kiểm tra Internet/proxy công ty (biến HTTPS_PROXY) rồi chạy lại 03.")
@@ -585,16 +641,13 @@ def cmd_cai_dat(log):
     save_json(INSTALL_MARKER, {"luc": datetime.now().isoformat(timespec="seconds"), "playwright": playwright_version(),
                                "trinh_duyet": BROWSER_EXE or BROWSER, "python": platform.python_version()})
     log.line("    Đã ghi nhận: thư viện Python + Playwright cài đặt thành công và mở được trình duyệt.")
-    rc = 0
-    if not find_poppler():
-        log.line("[LỖI] Chưa có Poppler — bước 05 sẽ không chạy được.\n" + HUONG_DAN["poppler"])
-        rc = 1
-    if not find_soffice():
-        log.line("[LỖI] Chưa có LibreOffice — bước 05 sẽ không chạy được. " + HUONG_DAN["libreoffice"])
-        rc = 1
-    log.line("KẾT LUẬN: " + ("ĐẠT — đã cài đủ thư viện." if rc == 0 else
-                            "Thư viện Python/Node đã cài xong, nhưng còn thiếu công cụ ở trên. Cài xong chạy lại 01."))
-    return rc
+    log.line("    Poppler (tùy chọn): " + (find_poppler() or "không có — đối chiếu chéo PDF sẽ ghi SKIP"))
+    log.line("    LibreOffice (tùy chọn): " + (find_soffice() or "không có — dựng trang Word bằng LibreOffice sẽ ghi SKIP"))
+    used = disk_used()
+    log.line(f"    Dung lượng cài đặt: môi trường ảo {used['môi trường ảo Python']:.0f} MB, "
+             f"node_modules {used['node_modules (Playwright)']:.0f} MB.")
+    log.line("KẾT LUẬN: ĐẠT — đã cài đủ thư viện bắt buộc.")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -664,18 +717,18 @@ def cmd_kiem_thu_edge(log):
 def cmd_doi_chieu(log):
     if not preconditions(log, need_results=True):
         return 1
+    if not disk_ok(log, MIN_FREE_GB, "kiểm tra dữ liệu lớn (200.000 dòng)"):
+        return 1
     pb, so = find_poppler(), find_soffice()
-    if not pb:
-        log.line("[LỖI] Không tìm thấy Poppler — KHÔNG thể đối chiếu file PDF. Bước này dừng lại (không bỏ qua).")
-        log.line(HUONG_DAN["poppler"])
-        return 1
-    if not so:
-        log.line("[LỖI] Không tìm thấy LibreOffice — KHÔNG thể kiểm tra file Word. Bước này dừng lại (không bỏ qua).")
-        log.line(HUONG_DAN["libreoffice"])
-        return 1
-    log.line(f"    Poppler {poppler_version(pb)}: {pb}")
-    log.line(f"    LibreOffice: {so}")
-    env = child_env({"PATH": pb + os.pathsep + os.environ.get("PATH", ""), "NGHIEMTHU_SOFFICE": so})
+    log.line("    PDF: kiểm tra bằng pdfcheck.py (thư viện chuẩn Python). Word: python-docx. Excel: openpyxl.")
+    log.line(f"    Poppler (tùy chọn): {pb + ' — chạy thêm đối chiếu chéo' if pb else 'không có — đối chiếu chéo ghi SKIP'}")
+    log.line(f"    LibreOffice (tùy chọn): {so + ' — chạy thêm dựng trang Word' if so else 'không có — dựng trang Word ghi SKIP'}")
+    extra = {}
+    if pb:
+        extra["PATH"] = pb + os.pathsep + os.environ.get("PATH", "")
+    if so:
+        extra["NGHIEMTHU_SOFFICE"] = so
+    env = child_env(extra)
     archive(DIRS["lon"], log)
     try:
         with Server(log, "05") as srv:
@@ -691,9 +744,10 @@ def cmd_doi_chieu(log):
     vr = load_json(DIRS["tu_dong"] / "verify_results.json", {})
     lr = load_json(DIRS["lon"] / "large_results.json", [])
     log.line("")
-    log.line(f"KẾT QUẢ ĐỐI CHIẾU: {vr.get('passed', 0)}/{vr.get('total', 0)} PASS")
+    log.line(f"KẾT QUẢ ĐỐI CHIẾU: {vr.get('passed', 0)} PASS, {vr.get('failed', 0)} FAIL, {vr.get('skipped', 0)} SKIP "
+             f"/ {vr.get('total', 0)} (SKIP = công cụ tùy chọn không có, KHÔNG tính là PASS)")
     for c in vr.get("checks", []):
-        if not c["pass"]:
+        if c_status(c) == "FAIL":
             log.line(f"   FAIL [{c['group']}] {c['name']} — {str(c['detail'])[:200]}")
     log.line(f"KẾT QUẢ DỮ LIỆU LỚN: {sum(1 for r in lr if r[1])}/{len(lr)} PASS")
     for name, ok, detail in lr:
@@ -707,6 +761,11 @@ def cmd_doi_chieu(log):
 # ---------------------------------------------------------------------------
 # 06 — Kiểm thử thủ công M01–M12 + báo cáo
 # ---------------------------------------------------------------------------
+
+
+def c_status(c):
+    """Trạng thái một mục của verify_results.json (bản cũ chỉ có 'pass')."""
+    return c.get("status") or ("PASS" if c.get("pass") else "FAIL")
 
 
 def manual_items():
@@ -724,7 +783,9 @@ def manual_items():
 
 
 MANUAL_FILE = DIRS["thu_cong"] / "ket_qua_thu_cong.json"
-CHUA = "CHƯA KIỂM THỬ"
+CHUA = "CHƯA KIỂM THỬ"  # NOT TESTED: luôn làm kết luận KHÔNG ĐẠT
+SKIP_NOTE = ("SKIP = phép kiểm tra phụ cần công cụ TÙY CHỌN (Poppler, LibreOffice) không có trên máy. SKIP không được tính "
+             "là PASS và không làm thay đổi kết luận; các phép kiểm tra bắt buộc tương ứng đã chạy bằng thư viện có sẵn.")
 MANUAL_LABEL = {"P": "PASS", "C": "PASS kèm cảnh báo HTTP", "F": "FAIL", "B": CHUA}
 RUN = {}  # bước đang chạy (để báo cáo ghi "ĐANG THỰC HIỆN" cho bước 06)
 
@@ -882,7 +943,7 @@ def build_report():
     if vr is None:
         rows = [not_run("V--", "Đối chiếu 6 tầng dữ liệu + trình bày file — bước 05 chưa chạy")]
     else:
-        rows = [{"ma": f"V{i + 1:02d}", "ten": f"[{c['group']}] {c['name']}", "kq": "PASS" if c["pass"] else "FAIL",
+        rows = [{"ma": f"V{i + 1:02d}", "ten": f"[{c['group']}] {c['name']}", "kq": c_status(c),
                  "chi_tiet": str(c["detail"]), "anh": []} for i, c in enumerate(vr.get("checks", []))]
     groups.append({"ma": "B", "ten": "Đối chiếu 6 tầng dữ liệu + trình bày file (verify.py, bước 05)", "rows": rows,
                    "co_ket_qua": vr is not None, "can_co": None})
@@ -910,6 +971,7 @@ def build_report():
         g["pass"] = sum(r["kq"] == "PASS" for r in g["rows"])
         g["fail"] = sum(r["kq"] == "FAIL" for r in g["rows"])
         g["chua"] = sum(r["kq"] == CHUA for r in g["rows"])
+        g["skip"] = sum(r["kq"] == "SKIP" for r in g["rows"])
 
     fails, incomplete = [], []
     env_errors = [i for i in (env or {}).get("muc", []) if i["trang_thai"] == "FAIL"]
@@ -943,26 +1005,34 @@ def build_report():
         "thu_muc": str(EDGE_DIR), "moi_truong": env,
         "loi_moi_truong": env_errors, "cac_buoc": step_rows(steps), "nhom_ui": ui_sum.get("sections", []), "nhom": groups,
         "tong": total, "pass": sum(g["pass"] for g in groups), "fail": sum(g["fail"] for g in groups),
-        "chua": sum(g["chua"] for g in groups), "ket_luan": verdict, "phan_loai": kind,
+        "chua": sum(g["chua"] for g in groups), "skip": sum(g["skip"] for g in groups), "ket_luan": verdict, "phan_loai": kind,
         "ly_do_fail": fails, "ly_do_chua_du": incomplete, "vi_tri": [(a, str(b)) for a, b in locations()],
     }
+
+
+def all_pass_text(r):
+    if r.get("skip"):
+        return (f"Mọi bài kiểm thử bắt buộc đều PASS. {r['skip']} mục phụ SKIP vì công cụ tùy chọn không có "
+                "(không tính là PASS, không ảnh hưởng kết luận).")
+    return "Mọi bài kiểm thử đều PASS."
 
 
 def render_md(r):
     head = f"**KẾT LUẬN: {r['ket_luan']}**" + (f" — {r['phan_loai']}" if r["phan_loai"] else "")
     L = ["# BÁO CÁO NGHIỆM THU — XUẤT BÁO CÁO TRÊN MICROSOFT EDGE", "", head, ""]
-    L += [f"- {x}" for x in r["ly_do_fail"] + r["ly_do_chua_du"]] or ["- Mọi bài kiểm thử đều PASS."]
+    L += [f"- {x}" for x in r["ly_do_fail"] + r["ly_do_chua_du"]] or [f"- {all_pass_text(r)}"]
     b = r["trinh_duyet"] or {}
-    L += ["", f"Tổng số bài kiểm thử: **{r['tong']}** — PASS: **{r['pass']}** — FAIL: **{r['fail']}** — {CHUA}: **{r['chua']}**",
+    L += ["", f"Tổng số bài kiểm thử: **{r['tong']}** — PASS: **{r['pass']}** — FAIL: **{r['fail']}** — {CHUA}: **{r['chua']}** — SKIP: **{r['skip']}**",
+          "", f"_{SKIP_NOTE}_",
           "", "## Thông tin", "", f"- Lập lúc: {r['lap_luc']}", f"- Người kiểm thử: {r['nguoi_kiem_thu'] or '—'}",
           f"- Máy tính: {r['may']} — {r['he_dieu_hanh']}",
           f"- Trình duyệt: {b.get('name')} {b.get('version')} — `{b.get('userAgent')}`" if b else f"- Trình duyệt: {CHUA} (bước 04 chưa chạy)", f"- Mã nguồn (commit): {r['commit']}", f"- Dấu vân tay mã nguồn: {r['dau_van_tay']}", f"- Thư mục kết quả: {r['thu_muc']}", "",
           "## 6 bước thực hiện", "", "| Bước | Trạng thái | Bắt đầu | Kết thúc | Thời gian | Mã thoát |", "|---|---|---|---|---|---|"]
     L += [f"| {s['ma']} {s['ten']} | {s['trang_thai']} | {s['bat_dau']} | {s['ket_thuc']} | "
           f"{fmt_secs(s['so_giay']) if s['so_giay'] is not None else ''} | {'' if s['ma_thoat'] is None else s['ma_thoat']} |" for s in r["cac_buoc"]]
-    L += ["", "## Tổng hợp", "", f"| Nhóm | Nội dung | Tổng | PASS | FAIL | {CHUA} |", "|---|---|---|---|---|---|"]
-    L += [f"| {g['ma']} | {g['ten']} | {g['tong']} | {g['pass']} | {g['fail']} | {g['chua']} |" for g in r["nhom"]]
-    L += [f"| | **Tổng cộng** | **{r['tong']}** | **{r['pass']}** | **{r['fail']}** | **{r['chua']}** |", "",
+    L += ["", "## Tổng hợp", "", f"| Nhóm | Nội dung | Tổng | PASS | FAIL | {CHUA} | SKIP |", "|---|---|---|---|---|---|---|"]
+    L += [f"| {g['ma']} | {g['ten']} | {g['tong']} | {g['pass']} | {g['fail']} | {g['chua']} | {g['skip']} |" for g in r["nhom"]]
+    L += [f"| | **Tổng cộng** | **{r['tong']}** | **{r['pass']}** | **{r['fail']}** | **{r['chua']}** | **{r['skip']}** |", "",
           "## Lỗi môi trường (bước 01)", ""]
     L += [f"- {i['ten']}: {i['chi_tiet']}" for i in r["loi_moi_truong"]] or ["Không có." if r["moi_truong"] else "Chưa chạy bước 01."]
     L += ["", "## Chi tiết lỗi", ""]
@@ -986,15 +1056,15 @@ def render_html(r):
     color = "#1b7f3b" if r["ket_luan"] == "ĐẠT" else ("#c62f2e" if r["ly_do_fail"] else "#b26a00")
 
     def badge(k):
-        c = {"PASS": "#1b7f3b", "ĐẠT": "#1b7f3b", "FAIL": "#c62f2e"}.get(k, "#c62f2e" if k.startswith(("CÓ LỖI", "FAIL")) else "#b26a00")
+        c = {"PASS": "#1b7f3b", "ĐẠT": "#1b7f3b", "FAIL": "#c62f2e", "SKIP": "#5f6b7a"}.get(k, "#c62f2e" if k.startswith(("CÓ LỖI", "FAIL")) else "#b26a00")
         return f'<span class="b" style="background:{c}">{e(k)}</span>'
 
     def imgs(lst):
         return "".join(f'<a href="{e(a)}"><img src="{e(a)}" alt="{e(a)}"></a>' for a in lst)
 
     b = r["trinh_duyet"] or {}
-    reasons = "".join(f"<li>{e(x)}</li>" for x in r["ly_do_fail"] + r["ly_do_chua_du"]) or "<li>Mọi bài kiểm thử đều PASS.</li>"
-    summary = "".join(f"<tr><td>{g['ma']}</td><td>{e(g['ten'])}</td><td>{g['tong']}</td><td>{g['pass']}</td><td>{g['fail']}</td><td>{g['chua']}</td></tr>"
+    reasons = "".join(f"<li>{e(x)}</li>" for x in r["ly_do_fail"] + r["ly_do_chua_du"]) or f"<li>{e(all_pass_text(r))}</li>"
+    summary = "".join(f"<tr><td>{g['ma']}</td><td>{e(g['ten'])}</td><td>{g['tong']}</td><td>{g['pass']}</td><td>{g['fail']}</td><td>{g['chua']}</td><td>{g['skip']}</td></tr>"
                       for g in r["nhom"])
     steps = "".join(f"<tr><td>{s['ma']} {e(s['ten'])}</td><td>{badge(s['trang_thai'])}</td><td>{e(s['bat_dau'])}</td><td>{e(s['ket_thuc'])}</td>"
                     f"<td>{fmt_secs(s['so_giay']) if s['so_giay'] is not None else ''}</td><td>{'' if s['ma_thoat'] is None else s['ma_thoat']}</td></tr>"
@@ -1014,7 +1084,7 @@ def render_html(r):
         body = "".join(f"<tr><td>{e(x['ma'])}</td><td>{e(x['ten'])}</td>" + (f"<td>{e(x.get('mong_doi', ''))}</td>" if g["ma"] == "D" else "")
                        + f"<td>{badge(x['kq'])}</td><td>{e(str(x['chi_tiet']))}</td><td>{imgs(x['anh'])}</td></tr>" for x in g["rows"])
         detail += (f"<details{' open' if g['fail'] or g['chua'] else ''}><summary>{g['ma']}. {e(g['ten'])} — {g['pass']}/{g['tong']} PASS, "
-                   f"{g['fail']} FAIL, {g['chua']} {CHUA}</summary>"
+                   f"{g['fail']} FAIL, {g['chua']} {CHUA}, {g['skip']} SKIP</summary>"
                    f"<table><tr><th>Mã</th><th>Bài kiểm thử</th>{extra}<th>Kết quả</th><th>Chi tiết</th><th>Ảnh</th></tr>{body}</table></details>")
     logs = "".join(f'<li><a href="logs/{e(p.name)}">{e(p.name)}</a></li>' for p in sorted(DIRS["logs"].glob("*.log"))) if DIRS["logs"].exists() else ""
     where = "".join(f"<tr><td>{e(a)}</td><td><code>{e(bb)}</code></td></tr>" for a, bb in r["vi_tri"])
@@ -1030,7 +1100,8 @@ th{{background:#1f5fad;color:#fff}}.v{{font-size:24px;font-weight:700;color:#fff
 details{{margin:8px 0}}summary{{cursor:pointer;font-weight:600}}code{{word-break:break-all}}</style></head><body>
 <h1>BÁO CÁO NGHIỆM THU — XUẤT BÁO CÁO TRÊN MICROSOFT EDGE</h1>
 <div class="v">KẾT LUẬN: {e(r['ket_luan'])}{kind}</div><ul>{reasons}</ul>
-<p><b>Tổng số bài kiểm thử:</b> {r['tong']} — <b>PASS:</b> {r['pass']} — <b>FAIL:</b> {r['fail']} — <b>{CHUA}:</b> {r['chua']}</p>
+<p><b>Tổng số bài kiểm thử:</b> {r['tong']} — <b>PASS:</b> {r['pass']} — <b>FAIL:</b> {r['fail']} — <b>{CHUA}:</b> {r['chua']} — <b>SKIP:</b> {r['skip']}</p>
+<p><small>{SKIP_NOTE}</small></p>
 <h2>Thông tin</h2><table>
 <tr><th>Lập lúc</th><td>{e(r['lap_luc'])}</td></tr><tr><th>Người kiểm thử</th><td>{e(r['nguoi_kiem_thu'] or '—')}</td></tr>
 <tr><th>Máy tính</th><td>{e(r['may'])} — {e(r['he_dieu_hanh'])}</td></tr>
@@ -1038,8 +1109,8 @@ details{{margin:8px 0}}summary{{cursor:pointer;font-weight:600}}code{{word-break
 <tr><th>Mã nguồn (commit)</th><td>{e(r['commit'])}</td></tr>
 <tr><th>Dấu vân tay mã nguồn</th><td>{e(r['dau_van_tay'])}</td></tr><tr><th>Thư mục kết quả</th><td>{e(r['thu_muc'])}</td></tr></table>
 <h2>6 bước thực hiện</h2><table><tr><th>Bước</th><th>Trạng thái</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời gian</th><th>Mã thoát</th></tr>{steps}</table>
-<h2>Tổng hợp</h2><table><tr><th>Nhóm</th><th>Nội dung</th><th>Tổng</th><th>PASS</th><th>FAIL</th><th>{CHUA}</th></tr>{summary}
-<tr><td></td><td><b>Tổng cộng</b></td><td><b>{r['tong']}</b></td><td><b>{r['pass']}</b></td><td><b>{r['fail']}</b></td><td><b>{r['chua']}</b></td></tr></table>
+<h2>Tổng hợp</h2><table><tr><th>Nhóm</th><th>Nội dung</th><th>Tổng</th><th>PASS</th><th>FAIL</th><th>{CHUA}</th><th>SKIP</th></tr>{summary}
+<tr><td></td><td><b>Tổng cộng</b></td><td><b>{r['tong']}</b></td><td><b>{r['pass']}</b></td><td><b>{r['fail']}</b></td><td><b>{r['chua']}</b></td><td><b>{r['skip']}</b></td></tr></table>
 <p>Tiêu chí (tài liệu nghiệm thu, mục 4.5): kiểm thử tự động trên Edge không có FAIL; M01–M12 tất cả PASS
 (M09 có thể "PASS kèm cảnh báo HTTP"). Bộ công cụ chỉ kết luận ĐẠT khi chạy đủ các bước, đúng trình duyệt Edge,
 không có bài FAIL và không còn bài {CHUA}.</p>
@@ -1119,9 +1190,9 @@ def cmd_tong_hop(log, ask=True, open_report=True, start_server=True):
     out = EDGE_DIR / "BAO_CAO_NGHIEM_THU.html"
     out.write_text(render_html(r), encoding="utf-8")
     log.line("")
-    log.line(f"Tổng số bài kiểm thử: {r['tong']} | PASS: {r['pass']} | FAIL: {r['fail']} | {CHUA}: {r['chua']}")
+    log.line(f"Tổng số bài kiểm thử: {r['tong']} | PASS: {r['pass']} | FAIL: {r['fail']} | {CHUA}: {r['chua']} | SKIP: {r['skip']}")
     for g in r["nhom"]:
-        log.line(f"  {g['ma']}. {g['ten']}: {g['pass']}/{g['tong']} PASS, {g['fail']} FAIL, {g['chua']} {CHUA}")
+        log.line(f"  {g['ma']}. {g['ten']}: {g['pass']}/{g['tong']} PASS, {g['fail']} FAIL, {g['chua']} {CHUA}, {g['skip']} SKIP")
     log.line("  6 bước: " + " | ".join(f"{s['ma']} {s['trang_thai']}" for s in r["cac_buoc"]))
     log.line(f"KẾT LUẬN: {r['ket_luan']}" + (f" — {r['phan_loai']}" if r["phan_loai"] else ""))
     for x in r["ly_do_fail"] + r["ly_do_chua_du"]:

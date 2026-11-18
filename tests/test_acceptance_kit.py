@@ -259,10 +259,61 @@ def test_verdict_manual_not_checked(kit):
 def test_verdict_environment_error(kit):
     _complete_run(kit)
     _write(kit.EDGE_DIR / "moi_truong.json", {"dat": False, "muc": [
-        {"ten": "Poppler", "trang_thai": "FAIL", "chi_tiet": "không tìm thấy", "huong_dan": ""}]})
+        {"ten": "Node.js ≥ 20", "trang_thai": "FAIL", "chi_tiet": "không tìm thấy node", "huong_dan": ""}]})
     r = kit.build_report()
-    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["loi_moi_truong"][0]["ten"] == "Poppler"
-    assert any("Poppler" in x for x in r["ly_do_fail"])
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["loi_moi_truong"][0]["ten"] == "Node.js ≥ 20"
+    assert any("Node.js" in x for x in r["ly_do_fail"])
+
+
+def test_optional_tools_missing_are_skip_not_fail(kit, monkeypatch):
+    """Poppler/LibreOffice are optional: shown as SKIP in step 01, never as FAIL or PASS."""
+    monkeypatch.setattr(kit, "find_poppler", lambda: None)
+    monkeypatch.setattr(kit, "find_soffice", lambda: None)
+    items = {i["ten"]: i for i in kit.env_items()}
+    pop = next(i for n, i in items.items() if n.startswith("Poppler"))
+    lo = next(i for n, i in items.items() if n.startswith("LibreOffice"))
+    assert pop["trang_thai"] == "SKIP" and lo["trang_thai"] == "SKIP"
+    assert "KHÔNG bắt buộc" in pop["huong_dan"] and "KHÔNG bắt buộc" in lo["huong_dan"]
+    assert "github.com" not in pop["huong_dan"] and "download" not in lo["huong_dan"]  # no install instructions
+    assert items["Bộ đọc PDF tích hợp (pdfcheck.py, thư viện chuẩn Python)"]["trang_thai"] == "PASS"
+    assert not [i for i in items.values() if i["trang_thai"] == "FAIL" and ("Poppler" in i["ten"] or "LibreOffice" in i["ten"])]
+
+
+def test_step_01_passes_without_optional_tools(kit, monkeypatch):
+    monkeypatch.setattr(kit, "find_poppler", lambda: None)
+    monkeypatch.setattr(kit, "find_soffice", lambda: None)
+    real = kit.env_items
+    monkeypatch.setattr(kit, "env_items", lambda: [i for i in real() if i["trang_thai"] != "FAIL"])  # other machine-specific items
+    log = kit.Log("01")
+    assert kit.cmd_kiem_tra(log) == 0
+    log.close()
+    text = log.path.read_text(encoding="utf-8")
+    assert "[SKIP] Poppler" in text and "[SKIP] LibreOffice" in text and "KẾT LUẬN: ĐẠT" in text
+
+
+def test_verify_skip_rows_never_count_as_pass(kit):
+    _complete_run(kit)
+    _write(kit.DIRS["tu_dong"] / "verify_results.json", {"total": 3, "passed": 2, "failed": 0, "skipped": 1, "checks": [
+        {"group": "G", "name": "a", "status": "PASS", "pass": True, "detail": ""},
+        {"group": "G", "name": "b", "status": "PASS", "pass": True, "detail": ""},
+        {"group": "Word — LibreOffice (tùy chọn)", "name": "c", "status": "SKIP", "pass": False, "detail": "không có"}]})
+    r = kit.build_report()
+    b = r["nhom"][1]
+    assert (b["tong"], b["pass"], b["fail"], b["chua"], b["skip"]) == (3, 2, 0, 0, 1)
+    assert r["skip"] == 1 and r["pass"] == 42 + 2 + 1 + 12
+    assert r["ket_luan"] == "ĐẠT", r["ly_do_fail"] + r["ly_do_chua_du"]  # SKIP alone does not block …
+    md = kit.render_md(r)
+    assert "SKIP: **1**" in md and "không được tính là PASS" in md and "Mọi bài kiểm thử đều PASS" not in md
+    assert "1 mục phụ SKIP" in kit.render_html(r)
+
+
+def test_verify_fail_still_blocks_with_skips(kit):
+    _complete_run(kit)
+    _write(kit.DIRS["tu_dong"] / "verify_results.json", {"total": 2, "checks": [
+        {"group": "G", "name": "a", "status": "FAIL", "pass": False, "detail": "lệch"},
+        {"group": "G", "name": "b", "status": "SKIP", "pass": False, "detail": ""}]})
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["fail"] == 1 and r["skip"] == 1
 
 
 def test_report_files_escape_content(kit):
@@ -290,6 +341,54 @@ def test_log_run_timeout_and_exit_code(kit):
     assert log.run(["khong-co-lenh-nay-xyz"]) == 127
     log.close()
     assert "Tiếng Việt" in log.path.read_text(encoding="utf-8")
+
+
+def test_pdfcheck_reads_vietnamese_pdf_without_poppler(tmp_path):
+    """pdfcheck.py (stdlib only) extracts text, pages, fonts and images from a reportlab PDF."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+
+    sys.path.insert(0, str(KIT))
+    try:
+        import pdfcheck
+    finally:
+        sys.path.remove(str(KIT))
+    font_dir = ROOT / "excel_dashboard" / "fonts"
+    pdfmetrics.registerFont(TTFont("DejaVuTest", str(font_dir / "DejaVuSans.ttf")))
+    path = tmp_path / "thử nghiệm.pdf"
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.setFont("DejaVuTest", 12)
+    c.drawString(72, 760, "BÁO CÁO DOANH THU — Đài Cà Mau")
+    c.drawString(72, 740, "Tổng cộng 24.550.000")
+    c.showPage()
+    c.setFont("DejaVuTest", 10)
+    c.drawString(72, 760, "Trang 2/2")
+    c.save()
+    pdf = pdfcheck.open_pdf(path)
+    assert pdf.header_ok and pdf.eof_ok and len(pdf.pages) == 2
+    assert all(round(p.width) == 595 and round(p.height) == 842 for p in pdf.pages)
+    used = [f for f in pdf.all_fonts() if "DejaVu" in f.name]  # reportlab also lists its unused default Helvetica
+    assert used and all(f.embedded for f in used)
+    lines = pdfcheck.text(pdf).split("\f")
+    assert lines[0].splitlines() == ["BÁO CÁO DOANH THU — Đài Cà Mau", "Tổng cộng 24.550.000"]
+    assert lines[1].strip() == "Trang 2/2"
+    (tmp_path / "hong.pdf").write_bytes(b"not a pdf")
+    with pytest.raises(Exception):
+        pdfcheck.text(tmp_path / "hong.pdf")
+
+
+def test_verify_needs_no_poppler_or_libreoffice():
+    """Poppler/LibreOffice are called only from the optional cross-checks, which SKIP when absent."""
+    src = (KIT / "verify.py").read_text(encoding="utf-8")
+    body = {m.group(1): m.group(2) for m in re.finditer(r"(?ms)^def (\w+)\(.*?\n(.*?)(?=^def |^if __name__)", src)}
+    callers = sorted(n for n, b in body.items() if re.search(r'run\("pdf|office_to_pdf\(', b))
+    assert callers == ["check_layouts", "poppler_crosscheck"], callers
+    assert 'if not shutil.which("pdftotext")' in body["poppler_crosscheck"] and "skip(" in body["poppler_crosscheck"]
+    assert "if not soffice:" in body["check_layouts"] and "skip(" in body["check_layouts"]
+    reqs = (KIT / "requirements-nghiemthu.txt").read_text(encoding="utf-8").lower()
+    assert "pypdf" not in reqs and "pymupdf" not in reqs and "fitz" not in reqs
 
 
 def test_find_poppler_via_env(kit, tmp_path, monkeypatch):
@@ -428,7 +527,7 @@ def test_vietnamese_results_folder_is_rejected(tmp_path, monkeypatch):
     try:
         mod = importlib.reload(importlib.import_module("nghiemthu"))
         item = next(i for i in mod.env_items() if i["ten"].startswith("Thư mục kết quả"))
-        assert item["trang_thai"] == "FAIL" and "Poppler" in item["huong_dan"]
+        assert item["trang_thai"] == "CẢNH BÁO" and "không dấu" in item["huong_dan"]
     finally:
         sys.path.remove(str(KIT))
 
