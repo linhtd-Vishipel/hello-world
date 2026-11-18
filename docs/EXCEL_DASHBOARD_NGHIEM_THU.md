@@ -88,12 +88,13 @@ python tools\acceptance\large_data.py C:\nghiemthu\samples C:\nghiemthu\large --
 ### 4.4 Kiểm thử thủ công trên Edge (tự động hoá không kiểm được)
 
 Mở `http://127.0.0.1:8000` bằng Edge, upload `SoTheoDoi_DoanhThu_2026.xlsx`, lọc
-Chi nhánh = Cà Mau, ngày 01/03/2026–30/06/2026.
+Chi nhánh = Cà Mau, ngày 01/03/2026–30/06/2026 (dùng cho M01, M03–M06). Riêng M02 dùng file Excel thực tế
+cần nghiệm thu: tiêu chí đối chiếu động với chính file nguồn, không phụ thuộc file mẫu hay số dòng cố định.
 
 | Mã | Thao tác | Kết quả mong đợi | PASS/FAIL |
 |---|---|---|---|
 | M01 | Bấm 📊 Xuất Excel | File `BaoCao_…_YYYYMMDD_HHMM.xlsx` vào thư mục Downloads; Edge hiện thông báo tải xong | |
-| M02 | Mở file Excel bằng Microsoft Excel | Không báo lỗi/sửa chữa file; tiếng Việt đúng; sheet "Dữ liệu chi tiết" 70 dòng có nút lọc, hàng tiêu đề cố định khi cuộn; sheet TK có biểu đồ sửa được; ngày dạng dd/mm/yyyy | |
+| M02 | Dùng **file Excel thực tế cần nghiệm thu** (số sheet, số dòng, cấu trúc bất kỳ). Upload, xuất 2 file Excel: (a) Phạm vi Excel = "Toàn bộ dữ liệu mọi sheet (không lọc)"; (b) sheet đang xem, không lọc, không sắp xếp, có bảng thống kê. Chạy `M02_DOI_CHIEU_EXCEL.bat` (hoặc chọn chạy khi tới M02 ở bước 06) với file nguồn + 2 file xuất. Mở 2 file xuất bằng Microsoft Excel | Đối chiếu tự động 0 FAIL: đúng tên sheet; số dòng mỗi sheet bằng số dòng dữ liệu của chính file nguồn (không cố định); không mất, không nhân đôi, không đổi thứ tự hay nội dung ngoài quy tắc xử lý (bỏ dòng "Tổng cộng", dòng/cột trống). Microsoft Excel mở không báo lỗi/sửa chữa file; tiếng Việt đúng; có nút lọc, hàng tiêu đề cố định khi cuộn; biểu đồ sheet TK bấm vào sửa được; cột ngày hiển thị dd/mm/yyyy (không áp dụng nếu file không có cột ngày) | |
 | M03 | Bấm 📄 Xuất PDF, mở bằng trình xem PDF của Edge và Adobe Reader | Tiếng Việt đúng, có biểu đồ, không trang trắng, tiêu đề mục không bị tách, "Trang x/y" | |
 | M04 | Bấm 📝 Xuất Word, mở bằng Microsoft Word | Không báo lỗi; bảng chi tiết in ngang, lặp tiêu đề mỗi trang; ảnh biểu đồ rõ | |
 | M05 | Bấm 👁 Xem trước báo cáo | PDF hiện trong cửa sổ xem trước của Edge; "Tải PDF này" tải đúng file | |

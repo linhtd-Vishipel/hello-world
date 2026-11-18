@@ -50,10 +50,11 @@ def kit(tmp_path, monkeypatch):
 
 def test_bat_files_exist_with_required_names():
     names = sorted(p.name for p in WIN.glob("*.bat"))
-    assert names == sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat"])
+    assert names == sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat", "M02_DOI_CHIEU_EXCEL.bat"])
 
 
-@pytest.mark.parametrize("name", sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat", "../../../BAT_DAU_NGHIEM_THU_EDGE.bat"]))
+@pytest.mark.parametrize("name", sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat", "M02_DOI_CHIEU_EXCEL.bat",
+                                                        "../../../BAT_DAU_NGHIEM_THU_EDGE.bat"]))
 def test_bat_file_is_safe_for_cmd(name):
     raw = (WIN / name).read_bytes()
     assert raw.isascii(), "BAT must be ASCII (no code page problems in cmd.exe)"
@@ -159,7 +160,8 @@ def test_gitattributes_keeps_bat_crlf():
 
 
 def test_orchestrator_commands_match_bats(kit):
-    assert set(kit.COMMANDS) == set(BATS.values())
+    assert set(kit.COMMANDS) == set(BATS.values()) | {"doi-chieu-excel"}
+    assert "doi-chieu-excel" in (WIN / "M02_DOI_CHIEU_EXCEL.bat").read_text(encoding="ascii")
     assert str(kit.EDGE_DIR).endswith("edge")
 
 
@@ -186,8 +188,11 @@ def _write(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
-def _complete_run(kit, *, channel="msedge", manual="P", ui_fail=None, ui_count=42, verify_first=False):
+def _complete_run(kit, *, channel="msedge", manual="P", ui_fail=None, ui_count=42, verify_first=False, m02=True):
     d = kit.DIRS
+    if m02:
+        _write(kit.M02_FILE, {"luc": "2026-11-18T10:00:00", "file_nguon": "Phu luc 2.xlsx", "file_xuat": [{"file": "BaoCao_x.xlsx"}],
+                              "sheet_nguon": [{"ten": "PL2.1", "so_dong": 26}], "pass": 30, "fail": 0, "skip": 1})
     _write(kit.EDGE_DIR / "moi_truong.json", {"muc": [], "dat": True})
     ui = [{"id": f"T{i:02d}", "name": f"bài {i}", "pass": f"T{i:02d}" != ui_fail, "detail": "<script>x</script>"}
           for i in range(1, ui_count + 1)]
@@ -562,3 +567,42 @@ def test_source_fingerprint_identifies_tested_code(kit, tmp_path):
     assert kit.source_fingerprint(copy) == base
     (copy / "excel_dashboard/export.py").write_text("# sua\n", encoding="utf-8")
     assert kit.source_fingerprint(copy)[0] != base[0]
+
+
+# ---------------------------------------------------------------------------
+# M02: dynamic Excel comparison
+# ---------------------------------------------------------------------------
+
+
+def test_m02_pass_requires_automatic_comparison(kit):
+    _complete_run(kit, m02=False)
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and any("M02" in x and "chưa chạy" in x for x in r["ly_do_fail"])
+    _write(kit.M02_FILE, {"file_nguon": "a.xlsx", "file_xuat": [{"file": "b.xlsx"}], "sheet_nguon": [], "pass": 9, "fail": 2})
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and any("M02" in x and "còn FAIL" in x for x in r["ly_do_fail"])
+
+
+def test_m02_detail_shows_dynamic_row_counts(kit):
+    _complete_run(kit)
+    r = kit.build_report()
+    assert r["ket_luan"] == "ĐẠT", r["ly_do_fail"] + r["ly_do_chua_du"]
+    m02 = next(x for x in r["nhom"][3]["rows"] if x["ma"] == "M02")
+    assert "'PL2.1' 26 dòng" in m02["chi_tiet"] and "30 PASS, 0 FAIL" in m02["chi_tiet"]
+
+
+def test_m02_manual_text_has_no_fixed_row_count(kit):
+    m02 = next(i for i in kit.manual_items() if i["ma"] == "M02")
+    assert not re.search(r"\b70\b", m02["thao_tac"] + m02["mong_doi"])
+    assert "M02_DOI_CHIEU_EXCEL.bat" in m02["thao_tac"] + m02["mong_doi"]
+
+
+def test_m02_command_without_files_is_not_tested(kit, monkeypatch):
+    monkeypatch.setattr(kit, "venv_modules", lambda: (True, "ok"))
+    kit.VPY.parent.mkdir(parents=True, exist_ok=True)
+    kit.VPY.write_text("")
+    log = kit.Log("M02")
+    assert kit.cmd_doi_chieu_excel(log, None, None) == 1
+    log.close()
+    assert "M02 CHƯA KIỂM THỬ" in log.path.read_text(encoding="utf-8")
+    assert not kit.M02_FILE.exists()

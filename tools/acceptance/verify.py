@@ -430,7 +430,7 @@ def check_excel(OUT, ctx, G):
 def check_pdf(OUT, ctx, G):
     sel, sel_sorted, dash, tt, sl, dg = ctx["sel"], ctx["sel_sorted"], ctx["dash"], ctx["tt"], ctx["sl"], ctx["dg"]
     path = one(OUT, "main_filtered_pdf__*.pdf")
-    t, pdf = pdf_layout("PDF dài vừa (70 dòng)", path)
+    t, pdf = pdf_layout(f"PDF dài vừa ({len(sel)} dòng)", path)
     missing_rows = [r[0] for r in sel_sorted if not re.search(rf"(?m)^\s*{re.escape(vn(r[0]))}\s+{r[1]:%d/%m/%Y}.*{re.escape(vn(r[8]))}\s*$", t)]
     check(G, "5a. PDF: đủ từng dòng chi tiết (STT, ngày, thành tiền)", not missing_rows, f"thiếu: {missing_rows[:5]}" if missing_rows else f"{len(sel_sorted)} dòng")
     check(G, "5b. PDF: chỉ số + điều kiện lọc", all(x in t for x in (vn(tt), vn(sl), vn(round(dg, 2)), "Cà Mau", "từ 01/03/2026 đến 30/06/2026", f"{len(sel)} / 1.200 dòng")))
@@ -467,7 +467,7 @@ def check_word(OUT, ctx, G):
     check("Word", "Có ảnh biểu đồ, chi tiết in ngang", len(d.inline_shapes) == len(dash["charts"]) and d.sections[-1].page_width > d.sections[-1].page_height)
     check("Word", "Tiêu đề và các mục nội dung đầy đủ",
           all(x in paras for x in ("BÁO CÁO DOANH THU DỊCH VỤ KỸ THUẬT 2026", "1. Thông tin báo cáo", "2. Chỉ số tổng hợp",
-                                   "3. Biểu đồ và bảng thống kê", "4. Dữ liệu chi tiết (70 dòng)")))
+                                   "3. Biểu đồ và bảng thống kê", f"4. Dữ liệu chi tiết ({len(sel_sorted)} dòng)")))
 
 
 def check_excel_scopes(OUT, ctx, G):

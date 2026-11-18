@@ -9,6 +9,7 @@ Bam dup lan luot cac file sau, cho file truoc xong roi moi mo file sau:
   04_KIEM_THU_EDGE.bat         42 bai kiem thu tu dong T01-T42 tren Edge
   05_DOI_CHIEU_KET_QUA.bat     Doi chieu du lieu, kiem tra file PDF/Word/Excel
   06_TONG_HOP_BAO_CAO.bat      Lam va nhap M01-M12, lap bao cao nghiem thu
+  M02_DOI_CHIEU_EXCEL.bat      Doi chieu file Excel xuat voi file Excel nguon bat ky - M02
 
 Ket qua, log, anh chup loi va bao cao: C:\nghiemthu\edge
 Bao cao: C:\nghiemthu\edge\BAO_CAO_NGHIEM_THU.html

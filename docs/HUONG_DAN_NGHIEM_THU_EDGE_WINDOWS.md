@@ -187,6 +187,39 @@ Kết thúc hiện `KẾT QUẢ ĐỐI CHIẾU: x/y PASS` và `KẾT QUẢ DỮ 
 Có thể chạy lại 06 nhiều lần (ví dụ làm M01–M06 hôm nay, M07–M12 hôm sau): nhấn **Enter** để giữ
 kết quả cũ, chỉ nhập bài cần cập nhật. File mẫu để upload nằm ở `C:\nghiemthu\edge\mau\`.
 
+### M02 — đối chiếu file Excel xuất với file Excel thực tế
+
+M02 **không dùng số dòng cố định**: số sheet, số dòng, số cột, tên cột đều lấy từ chính file nguồn, nên dùng được
+cho mọi báo cáo (ví dụ "Phụ lục 2 Bảng tổng hợp đánh giá chất lượng 2.2024", sheet lớn nhất khoảng 26 dòng).
+
+1. Trên Edge (`http://127.0.0.1:8000`), upload **file Excel thực tế** cần nghiệm thu.
+2. Xuất **2 file Excel**:
+   - (a) mục **Phạm vi Excel** chọn **"Toàn bộ dữ liệu mọi sheet (không lọc)"** → bấm 📊 Xuất Excel;
+   - (b) mục **Phạm vi Excel** chọn lại sheet đang xem, **không lọc, không sắp xếp**, có bảng thống kê → bấm 📊 Xuất Excel.
+3. Chạy đối chiếu tự động — tới M02 ở bước 06 máy hỏi "Chạy đối chiếu tự động M02 ngay?", bấm **Enter**
+   (hoặc chạy riêng **`M02_DOI_CHIEU_EXCEL.bat`** bất kỳ lúc nào):
+   - **File nguồn**: kéo-thả file Excel thực tế vào cửa sổ, bấm Enter;
+   - **File xuất**: máy liệt kê các file `BaoCao_*.xlsx` mới nhất trong thư mục Downloads, gõ số của 2 file vừa xuất
+     (ví dụ `1,2`), bấm Enter, rồi bấm Enter lần nữa để bắt đầu.
+4. Máy chỉ **đọc** file (không sửa file nguồn, không thêm dữ liệu) và kiểm tra cho **từng sheet**:
+
+   | Nội dung | Cách kiểm |
+   |---|---|
+   | Đúng tên và thứ tự sheet | theo quy tắc đặt tên của Web App (`Tổng quan`, `TK..`, `DL <tên sheet>` / `Dữ liệu chi tiết`) |
+   | Đúng số dòng thực tế | bằng số dòng dữ liệu của sheet nguồn sau quy tắc xử lý (bỏ dòng tiêu đề, dòng/cột trống, dòng "Tổng cộng") |
+   | Không mất, không nhân đôi, không thêm dòng | so khớp từng dòng; thêm đối chiếu thô với file nguồn không qua quy tắc xử lý |
+   | Không đổi thứ tự, nội dung | so từng ô với file nguồn |
+   | Tiêu đề, bộ lọc, cố định hàng tiêu đề | hàng tiêu đề in đậm, AutoFilter, Freeze Panes |
+   | Biểu đồ sửa được | biểu đồ Excel thật, dữ liệu lấy từ ô của sheet (không phải ảnh) |
+   | Ngày dd/mm/yyyy | định dạng ô và giá trị ngày thật; **SKIP** nếu file không có cột ngày |
+
+   Kết quả lưu ở `C:\nghiemthu\edge\thu_cong\m02_doi_chieu_excel.md` (và `.json`).
+5. Mở 2 file xuất bằng **Microsoft Excel**, kiểm bằng mắt: không có thông báo sửa chữa file; tiếng Việt đúng;
+   nút lọc hoạt động; cuộn xuống hàng tiêu đề vẫn đứng yên; bấm vào biểu đồ ở sheet `TK..` → hiện thẻ **Chart Design**
+   (sửa được); cột ngày hiển thị `dd/mm/yyyy`.
+6. Nhập kết quả M02: **P** chỉ được chấp nhận khi đối chiếu tự động đã chạy và **0 FAIL**; nếu chưa chạy hoặc còn
+   FAIL, máy chỉ cho nhập F hoặc B. SKIP (không áp dụng) không được tính là PASS.
+
 ---
 
 ## 3. Đọc báo cáo nghiệm thu
@@ -228,6 +261,7 @@ C:\nghiemthu\edge\
 ├─ ket_qua_tu_dong\                  file tải về (Excel/PDF/Word), ảnh loi_*.png, ui_*.png, kết quả 04 + 05
 ├─ ket_qua_du_lieu_lon\              kết quả kiểm tra dữ liệu lớn
 ├─ thu_cong\ket_qua_thu_cong.json    kết quả M01–M12;  thu_cong\anh\  ảnh chụp lỗi thủ công
+├─ thu_cong\m02_doi_chieu_excel.md   kết quả đối chiếu tự động M02 (file Excel xuất ↔ file nguồn)
 ├─ du_lieu_may_chu\, du_lieu_thu_cong\   dữ liệu Web App khi kiểm thử
 ├─ logs\                             01_...log → 06_...log, may_chu_*.log
 └─ lan_chay_truoc\<thời điểm>\       kết quả, mẫu, báo cáo, kết quả M01–M12 các lần trước (không bị xoá)

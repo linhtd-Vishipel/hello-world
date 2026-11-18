@@ -74,10 +74,12 @@ TESTED_PY = (3, 13)  # phiên bản Python mới nhất đã chạy thử bộ c
 STEP_NAMES = {
     "01": "Kiểm tra môi trường", "02": "Tạo dữ liệu mẫu", "03": "Cài đặt thư viện",
     "04": "Kiểm thử tự động trên Edge", "05": "Đối chiếu kết quả", "06": "Tổng hợp báo cáo",
+    "M02": "M02 — đối chiếu file Excel xuất với file nguồn",
 }
+MAIN_STEPS = ["01", "02", "03", "04", "05", "06"]
 
 LOG_NAMES = {"01": "kiem_tra_moi_truong", "02": "tao_du_lieu_mau", "03": "cai_dat_thu_vien",
-             "04": "kiem_thu_edge", "05": "doi_chieu_ket_qua", "06": "tong_hop_bao_cao"}
+             "04": "kiem_thu_edge", "05": "doi_chieu_ket_qua", "06": "tong_hop_bao_cao", "M02": "m02_doi_chieu_excel"}
 
 HUONG_DAN = {
     "python": "Cài Python 3.11 trở lên từ https://www.python.org/downloads/windows/ — khi cài, tích "
@@ -802,6 +804,83 @@ def backup(paths, sub):
     return dest
 
 
+M02_FILE = DIRS["thu_cong"] / "m02_doi_chieu_excel.json"
+
+
+def downloads_dir():
+    return Path(os.environ.get("USERPROFILE") or Path.home()) / "Downloads"
+
+
+def _ask_path(prompt):
+    while True:
+        raw = input(prompt).strip().strip('"').strip()
+        if not raw:
+            return None
+        p = Path(raw)
+        if p.is_file():
+            return p
+        print(f"      Không thấy file: {raw} — nhập lại (Enter để bỏ qua).")
+
+
+def m02_state():
+    """(trạng thái, mô tả) của lần đối chiếu M02 gần nhất: None nếu chưa chạy."""
+    r = load_json(M02_FILE)
+    if not r:
+        return None, "chưa chạy đối chiếu tự động M02"
+    text = (f"đối chiếu tự động {r.get('luc', '')}: {r.get('pass', 0)} PASS, {r.get('fail', 0)} FAIL, "
+            f"{r.get('skip', 0)} SKIP — nguồn {Path(r.get('file_nguon', '')).name}, "
+            + "; ".join(f"'{s['ten']}' {s['so_dong']} dòng" for s in r.get("sheet_nguon", [])))
+    return ("FAIL" if r.get("fail") or not r.get("file_xuat") else "PASS"), text
+
+
+def cmd_doi_chieu_excel(log, nguon=None, xuat=None):
+    """M02: đối chiếu ĐỘNG file Excel xuất với file Excel nguồn bất kỳ (không cố định số dòng)."""
+    if not VPY.is_file() or not venv_modules()[0]:
+        log.line("[LỖI] Chưa cài thư viện → " + HUONG_DAN["thu_vien"])
+        return 1
+    interactive = sys.stdin is not None and sys.stdin.isatty()
+    src = Path(nguon) if nguon else None
+    files = [Path(x) for x in (xuat or [])]
+    if not src and interactive:
+        log.line("Kéo-thả FILE EXCEL NGUỒN (file đã upload lên Web App) vào cửa sổ này rồi bấm Enter.")
+        src = _ask_path("   File nguồn: ")
+    if not files and interactive:
+        recent = sorted(downloads_dir().glob("BaoCao_*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)[:9]
+        if recent:
+            log.line(f"File Excel xuất gần nhất trong {downloads_dir()}:")
+            for i, p in enumerate(recent, 1):
+                log.line(f"   {i}. {p.name}  ({datetime.fromtimestamp(p.stat().st_mtime):%d/%m/%Y %H:%M})")
+        log.line("Chọn file xuất: gõ số thứ tự (nhiều file cách nhau dấu phẩy, ví dụ 1,2) hoặc kéo-thả từng file, Enter để kết thúc.")
+        while True:
+            raw = input("   File xuất: ").strip().strip('"').strip()
+            if not raw:
+                break
+            picks = [x.strip() for x in raw.split(",")]
+            if all(x.isdigit() and 1 <= int(x) <= len(recent) for x in picks):
+                files += [recent[int(x) - 1] for x in picks]
+            elif Path(raw).is_file():
+                files.append(Path(raw))
+            else:
+                print("      Không hợp lệ, nhập lại.")
+    missing = ([] if src and src.is_file() else ["file nguồn"]) + ([] if files and all(f.is_file() for f in files) else ["file xuất"])
+    if missing:
+        log.line(f"[LỖI] Chưa có {' và '.join(missing)} — M02 CHƯA KIỂM THỬ (không ghi PASS).")
+        return 1
+    log.line(f"    File nguồn: {src}")
+    for f in files:
+        log.line(f"    File xuất : {f}")
+    log.line("    Chỉ đọc, không sửa file nguồn và file xuất.")
+    code = log.run([VPY, ACC / "m02_excel.py", "--nguon", src] + sum((["--xuat", f] for f in files), [])
+                   + ["--out", DIRS["thu_cong"]], cwd=ACC, timeout=1800)
+    state, text = m02_state()
+    log.line("")
+    log.line(f"KẾT QUẢ M02 TỰ ĐỘNG: {text}")
+    log.line(f"Chi tiết: {DIRS['thu_cong'] / 'm02_doi_chieu_excel.md'}")
+    log.line("KẾT LUẬN: " + ("phần tự động ĐẠT — còn kiểm bằng mắt trong Microsoft Excel (xem M02 trong hướng dẫn)."
+                            if code == 0 and state == "PASS" else "CÓ LỖI — M02 không được ghi PASS cho tới khi sửa và chạy lại."))
+    return code
+
+
 def manual_entry(log):
     items = manual_items()
     data = load_json(MANUAL_FILE, {"ket_qua": {}})
@@ -820,9 +899,17 @@ def manual_entry(log):
         log.line(f"[{it['ma']}] Thao tác : {it['thao_tac']}")
         log.line(f"      Mong đợi: {it['mong_doi']}")
         log.line(f"      Kết quả đã nhập: {MANUAL_LABEL.get(old.get('ket_qua'), 'chưa có')}" + (f" — {old.get('ghi_chu')}" if old.get("ghi_chu") else ""))
+        if it["ma"] == "M02":
+            if input("      Chạy đối chiếu tự động M02 (file nguồn ↔ file Excel xuất) ngay? (Enter = có, K = không): ").strip().upper() != "K":
+                cmd_doi_chieu_excel(log)
+            st, text = m02_state()
+            log.line(f"      Đối chiếu tự động M02: {text}")
         opts = "P = PASS, F = FAIL, B = chưa kiểm thử" + (", C = PASS kèm cảnh báo HTTP" if it["ma"] == "M09" else "") + ", Enter = giữ nguyên"
         while True:
             ans = input(f"      Nhập ({opts}): ").strip().upper()
+            if ans == "P" and it["ma"] == "M02" and m02_state()[0] != "PASS":
+                print("      Không ghi PASS được: đối chiếu tự động M02 chưa chạy hoặc còn FAIL. Nhập F hoặc B.")
+                continue
             if ans == "" or ans in ("P", "F", "B") or (ans == "C" and it["ma"] == "M09"):
                 break
             print("      Không hợp lệ, nhập lại.")
@@ -882,7 +969,7 @@ STEP_STATUS_CHUA = "CHƯA CHẠY"
 def step_rows(steps):
     """Luôn đủ 6 bước 01–06, kể cả bước chưa chạy."""
     rows = []
-    for k in sorted(STEP_NAMES):
+    for k in MAIN_STEPS:
         s = dict(steps.get(k) or {})
         if RUN.get("step") == k:
             s = {"bat_dau": RUN["start"].isoformat(timespec="seconds"), "ket_thuc": "", "so_giay": None, "ma_thoat": None}
@@ -904,6 +991,7 @@ def locations():
         ("Ảnh chụp lỗi kiểm thử tự động (loi_*.png) + ảnh giao diện (ui_*.png)", DIRS["tu_dong"]),
         ("File Excel/PDF/Word tải về khi kiểm thử", DIRS["tu_dong"]),
         ("Ảnh chụp lỗi kiểm thử thủ công M01–M12", DIRS["anh"]),
+        ("Đối chiếu M02 (file Excel xuất ↔ file nguồn)", DIRS["thu_cong"] / "m02_doi_chieu_excel.md"),
         ("Kết quả kiểm tra dữ liệu lớn", DIRS["lon"]),
         ("Kết quả và báo cáo các lần chạy trước", DIRS["luu"]),
     ]
@@ -963,6 +1051,10 @@ def build_report():
                      "kq": {"P": "PASS", "C": "PASS", "F": "FAIL"}.get(k, CHUA),
                      "chi_tiet": (MANUAL_LABEL[k] if k == "C" else "") + (" — " if k == "C" and r.get("ghi_chu") else "") + r.get("ghi_chu", ""),
                      "anh": anh})
+    m02_st, m02_text = m02_state()
+    for row in rows:
+        if row["ma"] == "M02":
+            row["chi_tiet"] = (row["chi_tiet"] + " — " if row["chi_tiet"] else "") + m02_text
     groups.append({"ma": "D", "ten": "Kiểm thử thủ công M01–M12 trên Edge (mục 4.4, nhập ở bước 06)", "rows": rows,
                    "co_ket_qua": True, "can_co": 12})
 
@@ -992,6 +1084,10 @@ def build_report():
             fails.append(f"Nhóm {g['ma']}: {g['fail']} bài FAIL.")
         if g["chua"]:
             incomplete.append(f"Nhóm {g['ma']}: {g['chua']} bài {CHUA}.")
+    m02_row = next((x for x in groups[3]["rows"] if x["ma"] == "M02"), None)
+    if m02_row and m02_row["kq"] == "PASS" and m02_st != "PASS":
+        fails.append("M02 ghi PASS nhưng đối chiếu tự động file Excel xuất với file nguồn "
+                     + ("còn FAIL." if m02_st == "FAIL" else "chưa chạy (M02_DOI_CHIEU_EXCEL.bat)."))
     ui_f, vr_f = DIRS["tu_dong"] / "ui_results.json", DIRS["tu_dong"] / "verify_results.json"
     if ui_f.is_file() and vr_f.is_file() and vr_f.stat().st_mtime < ui_f.stat().st_mtime:
         incomplete.append("Kết quả đối chiếu (05) cũ hơn lần kiểm thử 04 gần nhất — chạy lại 05.")
@@ -1211,7 +1307,8 @@ def cmd_tong_hop(log, ask=True, open_report=True, start_server=True):
 
 
 COMMANDS = {"kiem-tra": ("01", cmd_kiem_tra), "tao-du-lieu": ("02", cmd_tao_du_lieu), "cai-dat": ("03", cmd_cai_dat),
-            "kiem-thu-edge": ("04", cmd_kiem_thu_edge), "doi-chieu": ("05", cmd_doi_chieu), "tong-hop": ("06", cmd_tong_hop)}
+            "kiem-thu-edge": ("04", cmd_kiem_thu_edge), "doi-chieu": ("05", cmd_doi_chieu), "tong-hop": ("06", cmd_tong_hop),
+            "doi-chieu-excel": ("M02", cmd_doi_chieu_excel)}
 
 
 def main(argv=None):
@@ -1220,6 +1317,8 @@ def main(argv=None):
     ap.add_argument("--khong-hoi", action="store_true", help="06: không hỏi nhập M01–M12")
     ap.add_argument("--khong-mo", action="store_true", help="06: không tự mở báo cáo")
     ap.add_argument("--khong-may-chu", action="store_true", help="06: không bật Web App cổng 8000 khi nhập M01–M12")
+    ap.add_argument("--nguon", help="doi-chieu-excel: file Excel nguồn đã upload")
+    ap.add_argument("--xuat", action="append", help="doi-chieu-excel: file Excel đã xuất (có thể lặp lại)")
     a = ap.parse_args(argv)
     step, fn = COMMANDS[a.lenh]
     try:
@@ -1235,7 +1334,7 @@ def main(argv=None):
     log.line(f"Thư mục kết quả: {EDGE_DIR}   |   Mã nguồn: {ROOT}")
     try:
         code = (fn(log, ask=not a.khong_hoi, open_report=not a.khong_mo, start_server=not a.khong_may_chu)
-                if a.lenh == "tong-hop" else fn(log))
+                if a.lenh == "tong-hop" else fn(log, a.nguon, a.xuat) if a.lenh == "doi-chieu-excel" else fn(log))
     except KeyboardInterrupt:
         log.line("[DỪNG] Người dùng đã dừng bước này.")
         code = 130
@@ -1244,7 +1343,8 @@ def main(argv=None):
         log.line(f"[LỖI KHÔNG MONG ĐỢI] {type(exc).__name__}: {exc}")
         log.line(traceback.format_exc())
         code = 1
-    record_step(step, started, code)
+    if step in MAIN_STEPS:
+        record_step(step, started, code)
     log.line(f"Thời gian: {fmt_secs((datetime.now() - started).total_seconds())} — mã thoát {code} — log: {log.path}")
     log.close()
     return code

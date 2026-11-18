@@ -10,11 +10,11 @@ Tài liệu này là **hồ sơ bàn giao** cho đợt nghiệm thu thực tế 
 |---|---|
 | Kho mã | `https://github.com/linhtd-Vishipel/hello-world` |
 | Nhánh | `claude/excel-upload-dashboard-app-xfssug` (chưa merge vào `main`) |
-| Dấu vân tay mã nguồn cần kiểm thử | **`d128bc94a9f4` (35 file)** — báo cáo nghiệm thu in giá trị này ở mục "Dấu vân tay mã nguồn" |
+| Dấu vân tay mã nguồn cần kiểm thử | **`8f20a1d16f9d` (37 file)** — báo cáo nghiệm thu in giá trị này ở mục "Dấu vân tay mã nguồn" |
 | `main` tại thời điểm bàn giao | `d8a0b8b` (chưa có thay đổi nào của nhánh này) |
 
 Dấu vân tay là mã băm của toàn bộ mã Web App và bộ nghiệm thu (đã chuẩn hoá xuống dòng), nên tải ZIP hay
-`git clone` đều cho cùng giá trị. **Nếu báo cáo in giá trị khác `d128bc94a9f4`, bản đã kiểm thử không phải bản bàn giao**
+`git clone` đều cho cùng giá trị. **Nếu báo cáo in giá trị khác `8f20a1d16f9d`, bản đã kiểm thử không phải bản bàn giao**
 — cần tải lại đúng nhánh và chạy lại.
 
 ## 2. Phạm vi sẽ phát hành (Pull Request `claude/excel-upload-dashboard-app-xfssug` → `main`)
@@ -23,7 +23,7 @@ Dấu vân tay là mã băm của toàn bộ mã Web App và bộ nghiệm thu (
 |---|---|
 | Web App Excel Dashboard | `excel_dashboard/`: upload Excel/CSV, tự nhận diện cột, dashboard, bộ lọc, biểu đồ |
 | Xuất báo cáo | Xuất Excel (.xlsx), PDF (A4, font tiếng Việt nhúng), Word (.docx) theo đúng bộ lọc; xem trước; nút Tải lại |
-| Bộ nghiệm thu | `tools/acceptance/` (6 file BAT, `nghiemthu.py`, kiểm thử tự động), `BAT_DAU_NGHIEM_THU_EDGE.bat` |
+| Bộ nghiệm thu | `tools/acceptance/` (6 file BAT + `M02_DOI_CHIEU_EXCEL.bat`, `nghiemthu.py`, kiểm thử tự động), `BAT_DAU_NGHIEM_THU_EDGE.bat` |
 | Tài liệu, kiểm thử | `docs/`, `tests/` |
 
 Không thay đổi: `app/` (API khách hàng, phân quyền), `addons/` (Odoo), quy trình CI `.github/workflows/tests.yml`.
@@ -35,9 +35,9 @@ python-multipart, reportlab, python-docx), `.gitignore`. Mọi file khác là fi
 
 | Nội dung | Trạng thái |
 |---|---|
-| 164 kiểm thử tự động (pytest), mô phỏng đúng CI: Python 3.11 + `requirements.txt` | Đạt trên **Linux** |
+| 178 kiểm thử tự động (pytest), mô phỏng đúng CI: Python 3.11 + `requirements.txt` | Đạt trên **Linux** |
 | Bộ nghiệm thu đủ 6 bước, kể cả các tình huống lỗi | Đạt trên **Linux, Chrome 153 thay cho Edge** |
-| 9 file BAT | **Chỉ kiểm tra tĩnh** (cú pháp, nhãn, ký tự đặc biệt, CRLF) — **chưa chạy bằng Windows CMD** |
+| 10 file BAT | **Chỉ kiểm tra tĩnh** (cú pháp, nhãn, ký tự đặc biệt, CRLF) — **chưa chạy bằng Windows CMD** |
 | Bộ nghiệm thu trên máy **không có Poppler và LibreOffice** (bước 01 ĐẠT, các mục phụ ghi SKIP) | Đạt trên **Linux, Chrome 153 thay cho Edge** |
 | Microsoft Edge, Microsoft Excel/Word, M01–M12 | **Chưa kiểm thử** — là nội dung của đợt nghiệm thu này |
 
@@ -53,7 +53,7 @@ Kết quả trên Linux **không** được dùng làm căn cứ nghiệm thu Wi
 
 | Chức năng | Bài kiểm thử tự động (bước 04–05) | Bài kiểm thử thủ công (bước 06) |
 |---|---|---|
-| Xuất Excel | T02, T04, T11, T14, T17, T21, T24, T31, T36 + đối chiếu 4a–4d | **M01** (tải file), **M02** (mở bằng Microsoft Excel) |
+| Xuất Excel | T02, T04, T11, T14, T17, T21, T24, T31, T36 + đối chiếu 4a–4d | **M01** (tải file), **M02** (đối chiếu động file xuất ↔ file Excel thực tế + mở bằng Microsoft Excel) |
 | Xuất PDF | T05, T10, T15, T18, T22, T25, T32 + đối chiếu 5a–5c, trình bày PDF | **M03** (mở bằng Edge và Adobe Reader), **M05** (xem trước) |
 | Xuất Word | T07, T16, T19, T23, T26 + đối chiếu 6a–6d, trình bày Word | **M04** (mở bằng Microsoft Word) |
 | Tải file trên Edge | T09, T41 | **M06, M07, M08, M09** |
@@ -76,7 +76,7 @@ Tất cả điều kiện phải đạt; chỉ cần một điều kiện không
 | G2 | **0 FAIL, 0 CHƯA KIỂM THỬ** ở cả 4 nhóm (A 42 bài, B đối chiếu, C 16 bài, D 12 bài M01–M12). Mục SKIP được ghi nhận riêng, không tính là PASS | `fail = 0`, `chua = 0` (số SKIP ở `skip`) |
 | G3 | Chạy trên **Microsoft Edge** qua kênh `msedge` | `trinh_duyet.launch.channel = "msedge"` |
 | G4 | Chạy trên **Windows 10 hoặc 11**, bước 01 không có lỗi môi trường | `he_dieu_hanh`, `loi_moi_truong = []` |
-| G5 | Đúng phiên bản bàn giao | `dau_van_tay` bắt đầu bằng `d128bc94a9f4` |
+| G5 | Đúng phiên bản bàn giao | `dau_van_tay` bắt đầu bằng `8f20a1d16f9d` |
 | G6 | Xuất Excel/PDF/Word được xác nhận: M01, M02, M03, M04, M05 đều PASS | nhóm D |
 | G7 | Pull Request: CI (`Tests`) đạt, không xung đột, chỉ gồm các thay đổi ở mục 2 | trang PR trên GitHub |
 | G8 | Người có thẩm quyền đồng ý hợp nhất (trả lời trong cuộc trao đổi) | tin nhắn xác nhận |
