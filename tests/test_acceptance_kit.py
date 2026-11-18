@@ -85,13 +85,73 @@ def test_common_bat_finds_python_and_tool():
     text = (WIN / "_chung.bat").read_text(encoding="ascii")
     assert r'set "TOOL=%~dp0..\nghiemthu.py"' in text
     assert (WIN / ".." / "nghiemthu.py").resolve().is_file()
-    # Tested versions first, then newest Python 3, then python.exe; each candidate is test-run,
-    # which rejects the Microsoft Store "python" alias stub.
-    order = [text.index(f'{c} -c "import sys"') for c in ("py -3.13", "py -3.12", "py -3.11", "py -3", "python")]
-    assert order == sorted(order)
     assert r'set "NGHIEMTHU_DIR=C:\nghiemthu\edge"' in text
     assert "if not defined NGHIEMTHU_DIR" in text  # a user-set folder is respected
     assert 'set "PYTHONDONTWRITEBYTECODE=1"' in text
+
+
+PY_CANDIDATES = ["py -3.13", "py -3.12", "py -3.11", "py -3", "python", "python3"]
+
+
+def _chung_lines():
+    return (WIN / "_chung.bat").read_text(encoding="ascii").splitlines()
+
+
+def test_common_bat_tries_python_candidates_in_order():
+    calls = [l.split(None, 2)[2] for l in _chung_lines() if l.startswith("call :thu_python ")]
+    assert calls == PY_CANDIDATES  # tested 3.13 > 3.12 > 3.11, then any Python 3, python.exe, python3.exe
+
+
+def test_common_bat_sets_py_only_after_version_check():
+    lines = _chung_lines()
+    sub = lines[lines.index(":thu_python"):]
+    run = sub.index('%* -c "import sys" >nul 2>&1')            # 1. the command runs at all (rejects Store stub)
+    check = sub.index('%* -c "%PY_KIEM_TRA%" >nul 2>&1')       # 2. version >= 3.11
+    assert sub[run + 1] == "if errorlevel 1 exit /b 0"
+    assert sub[check + 1] == "if errorlevel 1 goto :bo_qua_ban_cu"  # older: remember in PY_CU, keep searching
+    assert sub.index('set "PY=%*"') > check
+    # PY is assigned nowhere else, so no candidate can bypass the version check
+    assert [l for l in lines if l.startswith('set "PY=')] == ['set "PY="', 'set "PY=%*"']
+    assert sub[0:2] == [":thu_python", "if defined PY exit /b 0"]  # first suitable candidate wins
+
+
+def test_common_bat_reports_old_or_missing_python_with_error_code():
+    text = "\n".join(_chung_lines())
+    tail = text[text.index("if defined PY goto :co_python"):text.index("\n:thieu_tool")]
+    assert "Chi tim thay Python cu hon 3.11: %PY_CU%" in tail
+    assert "Khong tim thay Python tren may." in tail
+    assert tail.rstrip().endswith("exit /b 9009")
+
+
+@pytest.mark.parametrize("version,accepted", [
+    ((2, 7, 18), False), ((3, 9, 13), False), ((3, 10, 11), False),
+    ((3, 11, 0), True), ((3, 12, 7), True), ((3, 13, 1), True), ((3, 14, 0), True),
+])
+def test_common_bat_version_check_expression(version, accepted):
+    """Run the exact one-liner from _chung.bat with a simulated sys.version_info."""
+    import subprocess
+
+    line = next(l for l in _chung_lines() if l.startswith('set "PY_KIEM_TRA='))
+    code = line[len('set "PY_KIEM_TRA='):-1]
+    assert '"' not in code and "%" not in code and "!" not in code  # safe inside "%PY_KIEM_TRA%" in cmd
+    prog = f"import sys; sys.version_info = {version!r}\n{code}"
+    r = subprocess.run([sys.executable, "-c", prog], timeout=30)
+    assert (r.returncode == 0) is accepted
+
+
+@pytest.mark.parametrize("name", sorted(p.name for p in WIN.glob("*.bat")) + ["../../../BAT_DAU_NGHIEM_THU_EDGE.bat"])
+def test_bat_labels_and_comments(name):
+    lines = (WIN / name).read_text(encoding="ascii").splitlines()
+    labels = [l[1:].strip() for l in lines if re.match(r"^:\w+\s*$", l)]
+    assert len(labels) == len(set(labels)), "duplicate label"
+    for a in labels:
+        for b in labels:
+            assert a == b or not b.lower().startswith(a.lower()), f"label {a} is a prefix of {b}"
+    for target in re.findall(r"(?i)^\s*call\s+:(\w+)", "\n".join(lines), re.M):
+        assert target in labels, f"call :{target} has no label"
+    for l in lines:
+        if l.lower().startswith("rem"):
+            assert not re.search(r"[<>|&^]", l), f"cmd-special character in comment: {l!r}"
 
 
 def test_gitattributes_keeps_bat_crlf():
@@ -345,7 +405,8 @@ def test_environment_variable_names_are_consistent():
     for name in ("POPPLER_BIN", "NGHIEMTHU_SOFFICE", "NGHIEMTHU_DIR", "NGHIEMTHU_PORT"):
         assert name in guide, name
     bat_vars = set(re.findall(r"%([A-Z_]+)%", "".join(p.read_text(encoding="ascii") for p in WIN.glob("*.bat"))))
-    assert bat_vars <= {"NGHIEMTHU_DIR", "PY", "TOOL", "ERRORLEVEL", "MA"}, bat_vars
+    # PY_CU / PY_KIEM_TRA are internal to _chung.bat (Python version search)
+    assert bat_vars <= {"NGHIEMTHU_DIR", "PY", "TOOL", "ERRORLEVEL", "MA", "PY_CU", "PY_KIEM_TRA"}, bat_vars
 
 
 def test_runs_from_any_working_directory_and_paths_with_spaces(tmp_path):

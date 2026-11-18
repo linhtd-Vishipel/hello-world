@@ -62,9 +62,11 @@ Về đường dẫn:
 
 ### 1.2 Cài Python 3.12 hoặc 3.13 (khuyến nghị)
 
-Bộ công cụ chạy với Python 3.11 trở lên và đã chạy thử với 3.13. Nếu máy có nhiều phiên bản, file BAT tự
-chọn theo thứ tự 3.13 → 3.12 → 3.11 → bản Python 3 mới nhất. Phiên bản quá mới có thể chưa có sẵn
-gói cài đặt cho thư viện (bước 01 sẽ cảnh báo); khi đó cài thêm Python 3.13.
+Bộ công cụ **chỉ chấp nhận Python 3.11 trở lên** và đã chạy thử với 3.13. File BAT thử lần lượt
+`py -3.13` → `py -3.12` → `py -3.11` → `py -3` (bản Python 3 mới nhất) → `python` → `python3`;
+mỗi lựa chọn đều được chạy thử **và kiểm tra phiên bản** — bản cũ hơn 3.11 (ví dụ 3.10) bị bỏ qua và máy
+tìm tiếp lựa chọn sau. Phiên bản quá mới có thể chưa có sẵn gói cài đặt cho thư viện (bước 01 sẽ cảnh báo);
+khi đó cài thêm Python 3.13.
 
 1. Mở `https://www.python.org/downloads/windows/`, chọn bản **Python 3.13.x** (hoặc 3.12.x), tải **Windows installer (64-bit)**.
 2. Chạy file cài, **đánh dấu ô "Add python.exe to PATH"** ở màn hình đầu, rồi bấm **Install Now**.
@@ -260,6 +262,7 @@ Gửi kết quả: chuột phải thư mục `C:\nghiemthu\edge` → **Send to �
 | Hiện tượng | Cách xử lý |
 |---|---|
 | `[LOI] Khong tim thay Python tren may.` | Cài Python (mục 1.2), nhớ đánh dấu "Add python.exe to PATH", mở lại file BAT |
+| `[LOI] Chi tim thay Python cu hon 3.11: ...` | Máy chỉ có Python cũ (ví dụ 3.9, 3.10). Cài thêm Python 3.12 hoặc 3.13 (mục 1.2) — không cần gỡ bản cũ — rồi mở lại file BAT |
 | Mở BAT hiện "Windows protected your PC" | Bấm **More info → Run anyway**; lần sau nhớ Unblock file ZIP trước khi giải nén (mục 1.1) |
 | `[LỖI] Node.js` / `npm` không tìm thấy | Cài Node.js (mục 1.3), mở lại file BAT |
 | `[LỖI] Poppler ... không tìm thấy` | Làm mục 1.5, kiểm tra đúng có file `...\Library\bin\pdftotext.exe` |
