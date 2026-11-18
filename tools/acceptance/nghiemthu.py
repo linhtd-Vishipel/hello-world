@@ -776,6 +776,36 @@ def manual_entry(log):
     save_json(MANUAL_FILE, data)
 
 
+FINGERPRINT_SOURCES = ["requirements.txt", "excel_dashboard", "tools/acceptance", "docs/EXCEL_DASHBOARD_NGHIEM_THU.md",
+                       "BAT_DAU_NGHIEM_THU_EDGE.bat"]
+FINGERPRINT_SKIP_DIRS = {"node_modules", "__pycache__", ".pytest_cache"}
+FINGERPRINT_SKIP_EXT = {".pyc"}
+
+
+def source_fingerprint(root=None):
+    """SHA-256 của mã Web App + bộ nghiệm thu, dùng để chứng minh bản kiểm thử trên Windows chính là bản
+    sẽ phát hành — kể cả khi tải ZIP (không có .git). Chuẩn hoá CRLF → LF nên ZIP, git clone trên Windows
+    (core.autocrlf) và Linux cho cùng một giá trị. Trả về (12 ký tự đầu, số file)."""
+    import hashlib
+
+    root = Path(root or ROOT)
+    files = []
+    for src in FINGERPRINT_SOURCES:
+        p = root / src
+        if p.is_file():
+            files.append(p)
+        elif p.is_dir():
+            for f in p.rglob("*"):
+                rel = f.relative_to(root).parts
+                if f.is_file() and not FINGERPRINT_SKIP_DIRS.intersection(rel) and f.suffix not in FINGERPRINT_SKIP_EXT:
+                    files.append(f)
+    h = hashlib.sha256()
+    for f in sorted(files, key=lambda x: x.relative_to(root).as_posix()):
+        h.update(f.relative_to(root).as_posix().encode() + b"\0")
+        h.update(f.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    return h.hexdigest()[:12], len(files)
+
+
 def git_commit():
     git = shutil.which("git")
     if git:
@@ -909,7 +939,8 @@ def build_report():
     return {
         "lap_luc": datetime.now().isoformat(timespec="seconds"), "nguoi_kiem_thu": man.get("nguoi_kiem_thu", ""),
         "may": platform.node(), "he_dieu_hanh": f"{platform.system()} {platform.release()} ({platform.version()})",
-        "trinh_duyet": browser, "commit": git_commit(), "thu_muc": str(EDGE_DIR), "moi_truong": env,
+        "trinh_duyet": browser, "commit": git_commit(), "dau_van_tay": "{} ({} file)".format(*source_fingerprint()),
+        "thu_muc": str(EDGE_DIR), "moi_truong": env,
         "loi_moi_truong": env_errors, "cac_buoc": step_rows(steps), "nhom_ui": ui_sum.get("sections", []), "nhom": groups,
         "tong": total, "pass": sum(g["pass"] for g in groups), "fail": sum(g["fail"] for g in groups),
         "chua": sum(g["chua"] for g in groups), "ket_luan": verdict, "phan_loai": kind,
@@ -925,7 +956,7 @@ def render_md(r):
     L += ["", f"Tổng số bài kiểm thử: **{r['tong']}** — PASS: **{r['pass']}** — FAIL: **{r['fail']}** — {CHUA}: **{r['chua']}**",
           "", "## Thông tin", "", f"- Lập lúc: {r['lap_luc']}", f"- Người kiểm thử: {r['nguoi_kiem_thu'] or '—'}",
           f"- Máy tính: {r['may']} — {r['he_dieu_hanh']}",
-          f"- Trình duyệt: {b.get('name')} {b.get('version')} — `{b.get('userAgent')}`" if b else f"- Trình duyệt: {CHUA} (bước 04 chưa chạy)", f"- Mã nguồn (commit): {r['commit']}", f"- Thư mục kết quả: {r['thu_muc']}", "",
+          f"- Trình duyệt: {b.get('name')} {b.get('version')} — `{b.get('userAgent')}`" if b else f"- Trình duyệt: {CHUA} (bước 04 chưa chạy)", f"- Mã nguồn (commit): {r['commit']}", f"- Dấu vân tay mã nguồn: {r['dau_van_tay']}", f"- Thư mục kết quả: {r['thu_muc']}", "",
           "## 6 bước thực hiện", "", "| Bước | Trạng thái | Bắt đầu | Kết thúc | Thời gian | Mã thoát |", "|---|---|---|---|---|---|"]
     L += [f"| {s['ma']} {s['ten']} | {s['trang_thai']} | {s['bat_dau']} | {s['ket_thuc']} | "
           f"{fmt_secs(s['so_giay']) if s['so_giay'] is not None else ''} | {'' if s['ma_thoat'] is None else s['ma_thoat']} |" for s in r["cac_buoc"]]
@@ -1004,7 +1035,8 @@ details{{margin:8px 0}}summary{{cursor:pointer;font-weight:600}}code{{word-break
 <tr><th>Lập lúc</th><td>{e(r['lap_luc'])}</td></tr><tr><th>Người kiểm thử</th><td>{e(r['nguoi_kiem_thu'] or '—')}</td></tr>
 <tr><th>Máy tính</th><td>{e(r['may'])} — {e(r['he_dieu_hanh'])}</td></tr>
 <tr><th>Trình duyệt</th><td>{browser_html}</td></tr>
-<tr><th>Mã nguồn (commit)</th><td>{e(r['commit'])}</td></tr><tr><th>Thư mục kết quả</th><td>{e(r['thu_muc'])}</td></tr></table>
+<tr><th>Mã nguồn (commit)</th><td>{e(r['commit'])}</td></tr>
+<tr><th>Dấu vân tay mã nguồn</th><td>{e(r['dau_van_tay'])}</td></tr><tr><th>Thư mục kết quả</th><td>{e(r['thu_muc'])}</td></tr></table>
 <h2>6 bước thực hiện</h2><table><tr><th>Bước</th><th>Trạng thái</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời gian</th><th>Mã thoát</th></tr>{steps}</table>
 <h2>Tổng hợp</h2><table><tr><th>Nhóm</th><th>Nội dung</th><th>Tổng</th><th>PASS</th><th>FAIL</th><th>{CHUA}</th></tr>{summary}
 <tr><td></td><td><b>Tổng cộng</b></td><td><b>{r['tong']}</b></td><td><b>{r['pass']}</b></td><td><b>{r['fail']}</b></td><td><b>{r['chua']}</b></td></tr></table>

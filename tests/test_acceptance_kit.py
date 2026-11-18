@@ -431,3 +431,35 @@ def test_vietnamese_results_folder_is_rejected(tmp_path, monkeypatch):
         assert item["trang_thai"] == "FAIL" and "Poppler" in item["huong_dan"]
     finally:
         sys.path.remove(str(KIT))
+
+
+def test_source_fingerprint_identifies_tested_code(kit, tmp_path):
+    """The report's fingerprint must match between a ZIP download, a Windows git clone
+    (CRLF line endings) and the repository, ignore installed/caches, and change on any edit."""
+    import shutil
+    import subprocess
+
+    base = kit.source_fingerprint()
+    copy = tmp_path / "zip"
+    copy.mkdir()
+    archive = subprocess.run(["git", "-C", str(ROOT), "archive", "HEAD"], capture_output=True, check=True).stdout
+    subprocess.run(["tar", "-x", "-C", str(copy)], input=archive, check=True)
+    for src in ("tools/acceptance", "excel_dashboard", "docs/EXCEL_DASHBOARD_NGHIEM_THU.md", "requirements.txt"):
+        # working tree may be ahead of HEAD while developing: compare against the working tree content
+        a, b = ROOT / src, copy / src
+        if a.is_dir():
+            shutil.rmtree(b)
+            shutil.copytree(a, b, ignore=shutil.ignore_patterns("node_modules", "__pycache__"))
+        else:
+            shutil.copy2(a, b)
+    assert kit.source_fingerprint(copy) == base
+    for f in copy.rglob("*"):  # Windows clone with core.autocrlf=true
+        if f.is_file() and f.suffix in {".py", ".js", ".md", ".txt", ".json", ".html", ".css"}:
+            f.write_bytes(f.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    (copy / "tools/acceptance/node_modules/x").mkdir(parents=True)
+    (copy / "tools/acceptance/node_modules/x/a.js").write_text("installed")
+    (copy / "excel_dashboard/__pycache__").mkdir(exist_ok=True)
+    (copy / "excel_dashboard/__pycache__/m.pyc").write_bytes(b"cache")
+    assert kit.source_fingerprint(copy) == base
+    (copy / "excel_dashboard/export.py").write_text("# sua\n", encoding="utf-8")
+    assert kit.source_fingerprint(copy)[0] != base[0]
