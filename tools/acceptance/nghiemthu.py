@@ -64,6 +64,8 @@ SAMPLE_FILES = ["SoTheoDoi_DoanhThu_2026.xlsx", "NganGon_3Dong.xlsx", "QuyTac_Gi
                 "RatRong_40Cot.xlsx", "DaiTrungBinh_25000.xlsx", "RatLon_200000.xlsx"]
 PY_MODULES = ["fastapi", "uvicorn", "multipart", "openpyxl", "xlrd", "reportlab", "docx", "httpx", "psutil"]
 POPPLER_TOOLS = ["pdftotext", "pdfinfo", "pdffonts", "pdfimages"]
+INSTALL_MARKER = EDGE_DIR / "cai_dat_thanh_cong.json"  # chỉ ghi khi bước 03 cài + mở thử trình duyệt thành công
+TESTED_PY = (3, 13)  # phiên bản Python mới nhất đã chạy thử bộ công cụ
 STEP_NAMES = {
     "01": "Kiểm tra môi trường", "02": "Tạo dữ liệu mẫu", "03": "Cài đặt thư viện",
     "04": "Kiểm thử tự động trên Edge", "05": "Đối chiếu kết quả", "06": "Tổng hợp báo cáo",
@@ -153,8 +155,9 @@ class Log:
             if proc.poll() is None:  # stopped by an error or Ctrl+C: do not leave the child running
                 proc.kill()
         if fired.is_set():
-            self.line(f"{prefix}[LỖI] Quá thời gian {timeout} giây, đã dừng lệnh.")
+            self.line(f"{prefix}[LỖI] Quá thời gian {timeout} giây, đã dừng lệnh. (mã thoát 124)")
             return 124
+        self.line(f"{prefix}(mã thoát của lệnh: {code})")
         return code
 
     def close(self):
@@ -165,6 +168,7 @@ def child_env(extra=None):
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"  # không ghi __pycache__ vào thư mục mã nguồn Web App
     no_proxy = "127.0.0.1,localhost"
     for k in ("NO_PROXY", "no_proxy"):
         env[k] = f"{env[k]},{no_proxy}" if env.get(k) else no_proxy
@@ -405,8 +409,11 @@ def env_items():
     win = f"{platform.system()} {platform.release()} (build {platform.version()})"
     add("Hệ điều hành", "PASS" if IS_WIN else "CẢNH BÁO", win, "" if IS_WIN else "Không phải Windows: chỉ dùng để thử bộ công cụ.")
     v = sys.version_info
-    add("Python ≥ 3.11", "PASS" if v >= (3, 11) else "FAIL",
-        f"{platform.python_version()} {platform.architecture()[0]} — {sys.executable}", "" if v >= (3, 11) else HUONG_DAN["python"])
+    py_status = "FAIL" if v < (3, 11) else ("CẢNH BÁO" if v[:2] > TESTED_PY else "PASS")
+    add("Python ≥ 3.11", py_status, f"{platform.python_version()} {platform.architecture()[0]} — {sys.executable}",
+        {"FAIL": HUONG_DAN["python"],
+         "CẢNH BÁO": f"Phiên bản mới hơn bản đã chạy thử ({TESTED_PY[0]}.{TESTED_PY[1]}). Nếu bước 03 lỗi khi cài thư viện, "
+                     "cài thêm Python 3.12 hoặc 3.13 rồi chạy lại (bộ công cụ ưu tiên 'py -3')."}.get(py_status, ""))
     node, nver = find_node()
     if not node or not nver:
         add("Node.js ≥ 20", "FAIL", "không tìm thấy node", HUONG_DAN["node"])
@@ -437,6 +444,14 @@ def env_items():
     missing = [m for m in must if not (ROOT / m).is_file()]
     add("Mã nguồn Web App + bộ kiểm thử", "PASS" if not missing else "FAIL", str(ROOT) + (f"; thiếu {missing}" if missing else ""),
         "" if not missing else "Tải lại mã nguồn đúng nhánh claude/excel-upload-dashboard-app-xfssug.")
+    long_root = len(str(ACC / "node_modules")) > 110
+    add("Đường dẫn mã nguồn", "CẢNH BÁO" if long_root else "PASS", f"{ROOT} ({len(str(ROOT))} ký tự)",
+        "Đường dẫn dài, có thể vượt giới hạn 260 ký tự của Windows khi cài node_modules. Nên đặt mã nguồn ở "
+        "C:\\nghiemthu\\ma_nguon." if long_root else "")
+    ascii_out = str(EDGE_DIR).isascii()
+    add("Thư mục kết quả không có dấu tiếng Việt", "PASS" if ascii_out else "FAIL", str(EDGE_DIR),
+        "" if ascii_out else "Poppler trên Windows không đọc được đường dẫn có dấu. Dùng thư mục mặc định "
+        "C:\\nghiemthu\\edge (xoá biến NGHIEMTHU_DIR) hoặc một đường dẫn không dấu.")
     try:
         manual = manual_items()
         add("Danh mục M01–M12 trong tài liệu nghiệm thu", "PASS" if len(manual) == 12 else "FAIL", f"đọc được {len(manual)} mục từ {DOC.name}")
@@ -446,6 +461,10 @@ def env_items():
     add("Thư viện Python (môi trường ảo)", "PASS" if ok else "CẦN CÀI", f"{VENV} — {detail}", "" if ok else HUONG_DAN["thu_vien"])
     pw = playwright_version()
     add("Thư viện Playwright (Node)", "PASS" if pw else "CẦN CÀI", f"playwright {pw}" if pw else "chưa cài", "" if pw else HUONG_DAN["thu_vien"])
+    mk = load_json(INSTALL_MARKER)
+    add("Bước 03 đã cài đặt thành công", "PASS" if mk else "CẦN CÀI",
+        f"lúc {mk.get('luc')} — {mk.get('trinh_duyet', '')[:60]}" if mk else "chưa có lần cài đặt thành công",
+        "" if mk else HUONG_DAN["thu_vien"])
     missing_samples = [f for f in SAMPLE_FILES if not (DIRS["mau"] / f).is_file()]
     add("Dữ liệu mẫu", "PASS" if not missing_samples else "CẦN CÀI",
         f"{DIRS['mau']}" + (f" — thiếu {len(missing_samples)} file" if missing_samples else " — đủ 6 file"),
@@ -516,7 +535,7 @@ def cmd_tao_du_lieu(log):
         if log.run([VPY, "-m", "pip", "install", "--disable-pip-version-check", "openpyxl>=3.1"]) != 0:
             log.line("[LỖI] Không cài được openpyxl. Kiểm tra kết nối Internet/proxy rồi chạy lại.")
             return 1
-    DIRS["mau"].mkdir(parents=True, exist_ok=True)
+    archive(DIRS["mau"], log)  # không ghi đè: bộ mẫu cũ (nếu có) được chuyển vào lan_chay_truoc
     log.line(f"    Tạo 6 file Excel mẫu vào {DIRS['mau']} (khoảng 20–60 giây) ...")
     code = log.run([VPY, ACC / "make_samples.py", DIRS["mau"], "--big-rows", "200000"], timeout=1800)
     missing = [f for f in SAMPLE_FILES if not (DIRS["mau"] / f).is_file() or (DIRS["mau"] / f).stat().st_size == 0]
@@ -528,6 +547,8 @@ def cmd_tao_du_lieu(log):
 
 
 def cmd_cai_dat(log):
+    if INSTALL_MARKER.exists():
+        INSTALL_MARKER.unlink()  # chỉ đánh dấu lại khi lần cài này thành công trọn vẹn
     if not ensure_venv(log):
         log.line("[LỖI] Không tạo được môi trường Python. " + HUONG_DAN["python"])
         return 1
@@ -561,6 +582,9 @@ def cmd_cai_dat(log):
     if code:
         log.line("[LỖI] Playwright không mở được trình duyệt. " + HUONG_DAN["edge"])
         return 1
+    save_json(INSTALL_MARKER, {"luc": datetime.now().isoformat(timespec="seconds"), "playwright": playwright_version(),
+                               "trinh_duyet": BROWSER_EXE or BROWSER, "python": platform.python_version()})
+    log.line("    Đã ghi nhận: thư viện Python + Playwright cài đặt thành công và mở được trình duyệt.")
     rc = 0
     if not find_poppler():
         log.line("[LỖI] Chưa có Poppler — bước 05 sẽ không chạy được.\n" + HUONG_DAN["poppler"])
@@ -585,6 +609,9 @@ def preconditions(log, need_results=False):
         problems.append(f"Thư viện Python {detail} → {HUONG_DAN['thu_vien']}")
     if not playwright_version():
         problems.append(f"Chưa cài Playwright → {HUONG_DAN['thu_vien']}")
+    if not INSTALL_MARKER.is_file():
+        problems.append("Bước 03 chưa hoàn tất thành công (cài thư viện/npm hoặc mở thử trình duyệt bị lỗi) → "
+                        "chạy lại 03_CAI_DAT_THU_VIEN.bat cho tới khi ĐẠT. Không kiểm thử khi cài đặt chưa xong.")
     if [f for f in SAMPLE_FILES if not (DIRS["mau"] / f).is_file()]:
         problems.append(f"Thiếu dữ liệu mẫu trong {DIRS['mau']} → {HUONG_DAN['mau']}")
     if not find_test_browser()[0]:
@@ -630,7 +657,8 @@ def cmd_kiem_thu_edge(log):
         return 1
     log.line("KẾT LUẬN: " + ("ĐẠT — tiếp tục 05_DOI_CHIEU_KET_QUA.bat." if code == 0 and not fails else
                             f"CÓ LỖI (mã {code}). Ảnh chụp lỗi: {DIRS['tu_dong'] / 'loi_*.png'}. Vẫn chạy 05 và 06 để có báo cáo đầy đủ."))
-    return 0 if code == 0 and not fails else 1
+    # Mã thoát thực tế của accept.js (1 = có FAIL, 2 = không mở được trình duyệt/dừng bất thường).
+    return code if code else (1 if fails else 0)
 
 
 def cmd_doi_chieu(log):
@@ -673,7 +701,7 @@ def cmd_doi_chieu(log):
             log.line(f"   FAIL {name} — {detail}")
     good = c1 == 0 and c2 == 0 and vr.get("total") and not vr.get("failed") and lr and all(r[1] for r in lr)
     log.line("KẾT LUẬN: " + ("ĐẠT — tiếp tục 06_TONG_HOP_BAO_CAO.bat." if good else "CÓ LỖI — xem chi tiết ở trên; chạy 06 để lập báo cáo."))
-    return 0 if good else 1
+    return 0 if good else (c1 or c2 or 1)  # giữ mã thoát thực tế của verify.py / large_data.py
 
 
 # ---------------------------------------------------------------------------
@@ -696,13 +724,30 @@ def manual_items():
 
 
 MANUAL_FILE = DIRS["thu_cong"] / "ket_qua_thu_cong.json"
-MANUAL_LABEL = {"P": "PASS", "C": "PASS kèm cảnh báo HTTP", "F": "FAIL", "B": "CHƯA KIỂM"}
+CHUA = "CHƯA KIỂM THỬ"
+MANUAL_LABEL = {"P": "PASS", "C": "PASS kèm cảnh báo HTTP", "F": "FAIL", "B": CHUA}
+RUN = {}  # bước đang chạy (để báo cáo ghi "ĐANG THỰC HIỆN" cho bước 06)
+
+
+def backup(paths, sub):
+    """Sao lưu (copy) các file sắp bị cập nhật vào lan_chay_truoc/<thời điểm>/<sub>/ — không ghi đè mất dữ liệu."""
+    existing = [Path(p) for p in paths if Path(p).is_file()]
+    if not existing:
+        return None
+    dest = DIRS["luu"] / datetime.now().strftime("%Y%m%d_%H%M%S") / sub
+    dest.mkdir(parents=True, exist_ok=True)
+    for p in existing:
+        shutil.copy2(p, dest / p.name)
+    return dest
 
 
 def manual_entry(log):
     items = manual_items()
     data = load_json(MANUAL_FILE, {"ket_qua": {}})
     DIRS["anh"].mkdir(parents=True, exist_ok=True)
+    saved = backup([MANUAL_FILE], "thu_cong")
+    if saved:
+        log.line(f"(Đã sao lưu kết quả M01–M12 trước đó vào {saved})")
     log.line("KIỂM THỬ THỦ CÔNG M01–M12 (nội dung lấy nguyên văn từ tài liệu nghiệm thu, mục 4.4)")
     log.line(f"Ảnh chụp lỗi: lưu vào {DIRS['anh']} với tên bắt đầu bằng mã bài, ví dụ M07_1.png")
     log.line("(Chụp màn hình: Windows + Shift + S, rồi dán vào Paint và lưu.)")
@@ -714,7 +759,7 @@ def manual_entry(log):
         log.line(f"[{it['ma']}] Thao tác : {it['thao_tac']}")
         log.line(f"      Mong đợi: {it['mong_doi']}")
         log.line(f"      Kết quả đã nhập: {MANUAL_LABEL.get(old.get('ket_qua'), 'chưa có')}" + (f" — {old.get('ghi_chu')}" if old.get("ghi_chu") else ""))
-        opts = "P = PASS, F = FAIL, B = chưa kiểm" + (", C = PASS kèm cảnh báo HTTP" if it["ma"] == "M09" else "") + ", Enter = giữ nguyên"
+        opts = "P = PASS, F = FAIL, B = chưa kiểm thử" + (", C = PASS kèm cảnh báo HTTP" if it["ma"] == "M09" else "") + ", Enter = giữ nguyên"
         while True:
             ans = input(f"      Nhập ({opts}): ").strip().upper()
             if ans == "" or ans in ("P", "F", "B") or (ans == "C" and it["ma"] == "M09"):
@@ -740,8 +785,41 @@ def git_commit():
     return "không xác định"
 
 
+STEP_STATUS_CHUA = "CHƯA CHẠY"
+
+
+def step_rows(steps):
+    """Luôn đủ 6 bước 01–06, kể cả bước chưa chạy."""
+    rows = []
+    for k in sorted(STEP_NAMES):
+        s = dict(steps.get(k) or {})
+        if RUN.get("step") == k:
+            s = {"bat_dau": RUN["start"].isoformat(timespec="seconds"), "ket_thuc": "", "so_giay": None, "ma_thoat": None}
+        if not s:
+            status = STEP_STATUS_CHUA
+        elif s.get("ma_thoat") is None:
+            status = "ĐANG THỰC HIỆN"
+        else:
+            status = "ĐẠT" if s["ma_thoat"] == 0 else f"CÓ LỖI (mã thoát {s['ma_thoat']})"
+        rows.append({"ma": k, "ten": STEP_NAMES[k], "trang_thai": status, "bat_dau": s.get("bat_dau", ""),
+                     "ket_thuc": s.get("ket_thuc", ""), "so_giay": s.get("so_giay"), "ma_thoat": s.get("ma_thoat")})
+    return rows
+
+
+def locations():
+    return [
+        ("Báo cáo nghiệm thu", EDGE_DIR / "BAO_CAO_NGHIEM_THU.html"),
+        ("Log từng bước (01–06) và log Web App", DIRS["logs"]),
+        ("Ảnh chụp lỗi kiểm thử tự động (loi_*.png) + ảnh giao diện (ui_*.png)", DIRS["tu_dong"]),
+        ("File Excel/PDF/Word tải về khi kiểm thử", DIRS["tu_dong"]),
+        ("Ảnh chụp lỗi kiểm thử thủ công M01–M12", DIRS["anh"]),
+        ("Kết quả kiểm tra dữ liệu lớn", DIRS["lon"]),
+        ("Kết quả và báo cáo các lần chạy trước", DIRS["luu"]),
+    ]
+
+
 def build_report():
-    """Gom kết quả mọi bước → dict tổng hợp + kết luận."""
+    """Gom kết quả mọi bước → dict tổng hợp + kết luận ĐẠT / KHÔNG ĐẠT."""
     env = load_json(EDGE_DIR / "moi_truong.json")
     steps = load_json(EDGE_DIR / "trang_thai_cac_buoc.json", {})
     ui = load_json(DIRS["tu_dong"] / "ui_results.json")
@@ -753,25 +831,36 @@ def build_report():
 
     def shot_ui(test_id):
         out = []
-        for n in (f"loi_{test_id}.png",):
-            if (DIRS["tu_dong"] / n).is_file():
-                out.append(f"ket_qua_tu_dong/{n}")
+        if (DIRS["tu_dong"] / f"loi_{test_id}.png").is_file():
+            out.append(f"ket_qua_tu_dong/loi_{test_id}.png")
         sec = next((s["id"] for s in ui_sum.get("sections", []) if test_id in s.get("tests", [])), None)
         if sec and (DIRS["tu_dong"] / f"loi_{sec}.png").is_file():
             out.append(f"ket_qua_tu_dong/loi_{sec}.png")
         return out
 
+    def not_run(code, name):
+        return {"ma": code, "ten": name, "kq": CHUA, "chi_tiet": "Bước tương ứng chưa chạy hoặc chưa ghi được kết quả", "anh": []}
+
     groups = []
-    rows = [{"ma": s["id"], "ten": s["name"], "kq": "PASS" if s["pass"] else "FAIL", "chi_tiet": s["detail"],
-             "anh": [] if s["pass"] else shot_ui(s["id"])} for s in (ui or [])]
+    if ui is None:
+        rows = [not_run(f"T{i:02d}", "Bước 04 chưa chạy") for i in range(1, 43)]
+    else:
+        rows = [{"ma": s["id"], "ten": s["name"], "kq": "PASS" if s["pass"] else "FAIL", "chi_tiet": s["detail"],
+                 "anh": [] if s["pass"] else shot_ui(s["id"])} for s in ui]
     groups.append({"ma": "A", "ten": "Kiểm thử tự động giao diện T01–T42 (accept.js, bước 04)", "rows": rows,
                    "co_ket_qua": ui is not None, "can_co": 42})
-    rows = [{"ma": f"V{i + 1:02d}", "ten": f"[{c['group']}] {c['name']}", "kq": "PASS" if c["pass"] else "FAIL",
-             "chi_tiet": str(c["detail"]), "anh": []} for i, c in enumerate((vr or {}).get("checks", []))]
+    if vr is None:
+        rows = [not_run("V--", "Đối chiếu 6 tầng dữ liệu + trình bày file — bước 05 chưa chạy")]
+    else:
+        rows = [{"ma": f"V{i + 1:02d}", "ten": f"[{c['group']}] {c['name']}", "kq": "PASS" if c["pass"] else "FAIL",
+                 "chi_tiet": str(c["detail"]), "anh": []} for i, c in enumerate(vr.get("checks", []))]
     groups.append({"ma": "B", "ten": "Đối chiếu 6 tầng dữ liệu + trình bày file (verify.py, bước 05)", "rows": rows,
                    "co_ket_qua": vr is not None, "can_co": None})
-    rows = [{"ma": f"L{i + 1:02d}", "ten": r[0], "kq": "PASS" if r[1] else "FAIL", "chi_tiet": r[2], "anh": []}
-            for i, r in enumerate(lr or [])]
+    if lr is None:
+        rows = [not_run("L--", "Giới hạn dữ liệu lớn — bước 05 chưa chạy")]
+    else:
+        rows = [{"ma": f"L{i + 1:02d}", "ten": r[0], "kq": "PASS" if r[1] else "FAIL", "chi_tiet": r[2], "anh": []}
+                for i, r in enumerate(lr)]
     groups.append({"ma": "C", "ten": "Giới hạn dữ liệu lớn qua API (large_data.py, bước 05)", "rows": rows,
                    "co_ket_qua": lr is not None, "can_co": None})
     rows = []
@@ -780,7 +869,7 @@ def build_report():
         k = r.get("ket_qua", "B")
         anh = sorted(f"thu_cong/anh/{p.name}" for p in DIRS["anh"].glob(f"{it['ma']}*")) if DIRS["anh"].exists() else []
         rows.append({"ma": it["ma"], "ten": it["thao_tac"], "mong_doi": it["mong_doi"],
-                     "kq": {"P": "PASS", "C": "PASS", "F": "FAIL"}.get(k, "CHƯA KIỂM"),
+                     "kq": {"P": "PASS", "C": "PASS", "F": "FAIL"}.get(k, CHUA),
                      "chi_tiet": (MANUAL_LABEL[k] if k == "C" else "") + (" — " if k == "C" and r.get("ghi_chu") else "") + r.get("ghi_chu", ""),
                      "anh": anh})
     groups.append({"ma": "D", "ten": "Kiểm thử thủ công M01–M12 trên Edge (mục 4.4, nhập ở bước 06)", "rows": rows,
@@ -790,57 +879,61 @@ def build_report():
         g["tong"] = len(g["rows"])
         g["pass"] = sum(r["kq"] == "PASS" for r in g["rows"])
         g["fail"] = sum(r["kq"] == "FAIL" for r in g["rows"])
-        g["chua"] = sum(r["kq"] == "CHƯA KIỂM" for r in g["rows"])
+        g["chua"] = sum(r["kq"] == CHUA for r in g["rows"])
 
     fails, incomplete = [], []
+    env_errors = [i for i in (env or {}).get("muc", []) if i["trang_thai"] == "FAIL"]
     if not env:
         incomplete.append("Chưa chạy bước 01 (kiểm tra môi trường).")
-    elif not env.get("dat"):
-        incomplete.append("Bước 01 gần nhất còn mục LỖI — xử lý rồi chạy lại 01.")
+    elif env_errors:
+        fails.append("Lỗi môi trường ở lần chạy 01 gần nhất: " + "; ".join(f"{i['ten']} ({i['chi_tiet']})" for i in env_errors)
+                     + " — xử lý rồi chạy lại 01.")
     browser = (ui_sum or {}).get("browser") or {}
     launch = browser.get("launch") or {}
     if ui is not None and (launch.get("channel") != "msedge" or launch.get("executablePath")):
         incomplete.append(f"Kiểm thử tự động chạy trên '{browser.get('name')}' {launch}, KHÔNG phải Microsoft Edge "
                           "(kênh msedge) — không hợp lệ cho nghiệm thu Edge.")
     for g in groups:
-        if not g["co_ket_qua"]:
-            incomplete.append(f"Nhóm {g['ma']} chưa có kết quả (chưa chạy bước tương ứng).")
         if g["can_co"] and g["co_ket_qua"] and g["tong"] < g["can_co"]:
             incomplete.append(f"Nhóm {g['ma']} chỉ có {g['tong']}/{g['can_co']} bài.")
         if g["fail"]:
             fails.append(f"Nhóm {g['ma']}: {g['fail']} bài FAIL.")
         if g["chua"]:
-            incomplete.append(f"Nhóm {g['ma']}: {g['chua']} bài CHƯA KIỂM.")
+            incomplete.append(f"Nhóm {g['ma']}: {g['chua']} bài {CHUA}.")
     ui_f, vr_f = DIRS["tu_dong"] / "ui_results.json", DIRS["tu_dong"] / "verify_results.json"
     if ui_f.is_file() and vr_f.is_file() and vr_f.stat().st_mtime < ui_f.stat().st_mtime:
         incomplete.append("Kết quả đối chiếu (05) cũ hơn lần kiểm thử 04 gần nhất — chạy lại 05.")
-    verdict = "KHÔNG ĐẠT" if fails else ("CHƯA ĐỦ ĐIỀU KIỆN KẾT LUẬN" if incomplete else "ĐẠT")
+    verdict = "ĐẠT" if not fails and not incomplete else "KHÔNG ĐẠT"
+    kind = "" if verdict == "ĐẠT" else ("CÓ BÀI FAIL / LỖI" if fails else "CHƯA ĐỦ ĐIỀU KIỆN (còn bài chưa kiểm thử hoặc không chạy trên Edge)")
     total = sum(g["tong"] for g in groups)
     return {
         "lap_luc": datetime.now().isoformat(timespec="seconds"), "nguoi_kiem_thu": man.get("nguoi_kiem_thu", ""),
         "may": platform.node(), "he_dieu_hanh": f"{platform.system()} {platform.release()} ({platform.version()})",
-        "trinh_duyet": browser, "commit": git_commit(), "thu_muc": str(EDGE_DIR), "moi_truong": env, "cac_buoc": steps,
-        "nhom_ui": ui_sum.get("sections", []), "nhom": groups, "tong": total,
-        "pass": sum(g["pass"] for g in groups), "fail": sum(g["fail"] for g in groups), "chua": sum(g["chua"] for g in groups),
-        "ket_luan": verdict, "ly_do_fail": fails, "ly_do_chua_du": incomplete,
+        "trinh_duyet": browser, "commit": git_commit(), "thu_muc": str(EDGE_DIR), "moi_truong": env,
+        "loi_moi_truong": env_errors, "cac_buoc": step_rows(steps), "nhom_ui": ui_sum.get("sections", []), "nhom": groups,
+        "tong": total, "pass": sum(g["pass"] for g in groups), "fail": sum(g["fail"] for g in groups),
+        "chua": sum(g["chua"] for g in groups), "ket_luan": verdict, "phan_loai": kind,
+        "ly_do_fail": fails, "ly_do_chua_du": incomplete, "vi_tri": [(a, str(b)) for a, b in locations()],
     }
 
 
 def render_md(r):
-    L = ["# BÁO CÁO NGHIỆM THU — XUẤT BÁO CÁO TRÊN MICROSOFT EDGE", "",
-         f"**KẾT LUẬN: {r['ket_luan']}**", ""]
+    head = f"**KẾT LUẬN: {r['ket_luan']}**" + (f" — {r['phan_loai']}" if r["phan_loai"] else "")
+    L = ["# BÁO CÁO NGHIỆM THU — XUẤT BÁO CÁO TRÊN MICROSOFT EDGE", "", head, ""]
     L += [f"- {x}" for x in r["ly_do_fail"] + r["ly_do_chua_du"]] or ["- Mọi bài kiểm thử đều PASS."]
     b = r["trinh_duyet"] or {}
-    L += ["", "## Thông tin", "", f"- Lập lúc: {r['lap_luc']}", f"- Người kiểm thử: {r['nguoi_kiem_thu'] or '—'}",
-          f"- Máy tính: {r['may']} — {r['he_dieu_hanh']}", f"- Trình duyệt: {b.get('name')} {b.get('version')}",
-          f"- User agent: `{b.get('userAgent')}`", f"- Mã nguồn (commit): {r['commit']}", f"- Thư mục kết quả: {r['thu_muc']}", "",
-          "## Tổng hợp", "", "| Nhóm | Nội dung | Tổng | PASS | FAIL | Chưa kiểm |", "|---|---|---|---|---|---|"]
+    L += ["", f"Tổng số bài kiểm thử: **{r['tong']}** — PASS: **{r['pass']}** — FAIL: **{r['fail']}** — {CHUA}: **{r['chua']}**",
+          "", "## Thông tin", "", f"- Lập lúc: {r['lap_luc']}", f"- Người kiểm thử: {r['nguoi_kiem_thu'] or '—'}",
+          f"- Máy tính: {r['may']} — {r['he_dieu_hanh']}",
+          f"- Trình duyệt: {b.get('name')} {b.get('version')} — `{b.get('userAgent')}`" if b else f"- Trình duyệt: {CHUA} (bước 04 chưa chạy)", f"- Mã nguồn (commit): {r['commit']}", f"- Thư mục kết quả: {r['thu_muc']}", "",
+          "## 6 bước thực hiện", "", "| Bước | Trạng thái | Bắt đầu | Kết thúc | Thời gian | Mã thoát |", "|---|---|---|---|---|---|"]
+    L += [f"| {s['ma']} {s['ten']} | {s['trang_thai']} | {s['bat_dau']} | {s['ket_thuc']} | "
+          f"{fmt_secs(s['so_giay']) if s['so_giay'] is not None else ''} | {'' if s['ma_thoat'] is None else s['ma_thoat']} |" for s in r["cac_buoc"]]
+    L += ["", "## Tổng hợp", "", f"| Nhóm | Nội dung | Tổng | PASS | FAIL | {CHUA} |", "|---|---|---|---|---|---|"]
     L += [f"| {g['ma']} | {g['ten']} | {g['tong']} | {g['pass']} | {g['fail']} | {g['chua']} |" for g in r["nhom"]]
     L += [f"| | **Tổng cộng** | **{r['tong']}** | **{r['pass']}** | **{r['fail']}** | **{r['chua']}** |", "",
-          "## Thời gian thực hiện", "", "| Bước | Bắt đầu | Kết thúc | Thời gian | Mã thoát |", "|---|---|---|---|---|"]
-    for k in sorted(r["cac_buoc"]):
-        s = r["cac_buoc"][k]
-        L.append(f"| {k} {s['ten']} | {s['bat_dau']} | {s['ket_thuc']} | {fmt_secs(s['so_giay'])} | {s['ma_thoat']} |")
+          "## Lỗi môi trường (bước 01)", ""]
+    L += [f"- {i['ten']}: {i['chi_tiet']}" for i in r["loi_moi_truong"]] or ["Không có." if r["moi_truong"] else "Chưa chạy bước 01."]
     L += ["", "## Chi tiết lỗi", ""]
     errs = [(g, x) for g in r["nhom"] for x in g["rows"] if x["kq"] == "FAIL"]
     L += [f"- **{g['ma']}/{x['ma']}** {x['ten']} — {x['chi_tiet']}" + (f" — ảnh: {', '.join(x['anh'])}" if x["anh"] else "")
@@ -848,7 +941,7 @@ def render_md(r):
     for g in r["nhom"]:
         L += ["", f"## {g['ma']}. {g['ten']}", "", "| Mã | Bài kiểm thử | Kết quả | Chi tiết |", "|---|---|---|---|"]
         L += [f"| {x['ma']} | {x['ten'].replace('|', '/')} | {x['kq']} | {str(x['chi_tiet']).replace('|', '/')[:200]} |" for x in g["rows"]]
-    L += ["", "## Log", "", f"Thư mục: {DIRS['logs']}"]
+    L += ["", "## Vị trí lưu log và ảnh", ""] + [f"- {a}: `{b}`" for a, b in r["vi_tri"]]
     return "\n".join(L)
 
 
@@ -859,10 +952,10 @@ def fmt_secs(s):
 
 def render_html(r):
     e = html.escape
-    color = {"ĐẠT": "#1b7f3b", "KHÔNG ĐẠT": "#c62f2e"}.get(r["ket_luan"], "#b26a00")
+    color = "#1b7f3b" if r["ket_luan"] == "ĐẠT" else ("#c62f2e" if r["ly_do_fail"] else "#b26a00")
 
     def badge(k):
-        c = {"PASS": "#1b7f3b", "FAIL": "#c62f2e"}.get(k, "#b26a00")
+        c = {"PASS": "#1b7f3b", "ĐẠT": "#1b7f3b", "FAIL": "#c62f2e"}.get(k, "#c62f2e" if k.startswith(("CÓ LỖI", "FAIL")) else "#b26a00")
         return f'<span class="b" style="background:{c}">{e(k)}</span>'
 
     def imgs(lst):
@@ -872,50 +965,59 @@ def render_html(r):
     reasons = "".join(f"<li>{e(x)}</li>" for x in r["ly_do_fail"] + r["ly_do_chua_du"]) or "<li>Mọi bài kiểm thử đều PASS.</li>"
     summary = "".join(f"<tr><td>{g['ma']}</td><td>{e(g['ten'])}</td><td>{g['tong']}</td><td>{g['pass']}</td><td>{g['fail']}</td><td>{g['chua']}</td></tr>"
                       for g in r["nhom"])
-    steps = "".join(f"<tr><td>{k} {e(s['ten'])}</td><td>{e(s['bat_dau'])}</td><td>{e(s['ket_thuc'])}</td><td>{fmt_secs(s['so_giay'])}</td>"
-                    f"<td>{s['ma_thoat']}</td></tr>" for k, s in sorted(r["cac_buoc"].items()))
+    steps = "".join(f"<tr><td>{s['ma']} {e(s['ten'])}</td><td>{badge(s['trang_thai'])}</td><td>{e(s['bat_dau'])}</td><td>{e(s['ket_thuc'])}</td>"
+                    f"<td>{fmt_secs(s['so_giay']) if s['so_giay'] is not None else ''}</td><td>{'' if s['ma_thoat'] is None else s['ma_thoat']}</td></tr>"
+                    for s in r["cac_buoc"])
     secs = "".join(f"<tr><td>{e(s['id'])}</td><td>{e(s['name'])}</td><td>{e(', '.join(s['tests']))}</td><td>{fmt_secs(s['seconds'])}</td></tr>"
-                   for s in r["nhom_ui"])
+                   for s in r["nhom_ui"]) or f'<tr><td colspan="4">{CHUA}</td></tr>'
     errs = [(g, x) for g in r["nhom"] for x in g["rows"] if x["kq"] == "FAIL"]
     err_html = "".join(f"<tr><td>{g['ma']}/{e(x['ma'])}</td><td>{e(x['ten'])}</td><td>{e(str(x['chi_tiet']))}</td><td>{imgs(x['anh']) or '—'}</td></tr>"
                        for g, x in errs) or '<tr><td colspan="4">Không có lỗi.</td></tr>'
+    env_err = "".join(f"<li><b>{e(i['ten'])}</b>: {e(i['chi_tiet'])}</li>" for i in r["loi_moi_truong"]) or \
+        ("<li>Không có.</li>" if r["moi_truong"] else "<li>Chưa chạy bước 01.</li>")
     env_rows = "".join(f"<tr><td>{e(i['ten'])}</td><td>{badge(i['trang_thai'])}</td><td>{e(i['chi_tiet'])}</td></tr>"
-                       for i in (r["moi_truong"] or {}).get("muc", []))
+                       for i in (r["moi_truong"] or {}).get("muc", [])) or f'<tr><td colspan="3">{CHUA}</td></tr>'
     detail = ""
     for g in r["nhom"]:
         extra = "<th>Mong đợi</th>" if g["ma"] == "D" else ""
         body = "".join(f"<tr><td>{e(x['ma'])}</td><td>{e(x['ten'])}</td>" + (f"<td>{e(x.get('mong_doi', ''))}</td>" if g["ma"] == "D" else "")
                        + f"<td>{badge(x['kq'])}</td><td>{e(str(x['chi_tiet']))}</td><td>{imgs(x['anh'])}</td></tr>" for x in g["rows"])
-        detail += (f"<details{' open' if g['fail'] or g['chua'] else ''}><summary>{g['ma']}. {e(g['ten'])} — {g['pass']}/{g['tong']} PASS</summary>"
+        detail += (f"<details{' open' if g['fail'] or g['chua'] else ''}><summary>{g['ma']}. {e(g['ten'])} — {g['pass']}/{g['tong']} PASS, "
+                   f"{g['fail']} FAIL, {g['chua']} {CHUA}</summary>"
                    f"<table><tr><th>Mã</th><th>Bài kiểm thử</th>{extra}<th>Kết quả</th><th>Chi tiết</th><th>Ảnh</th></tr>{body}</table></details>")
     logs = "".join(f'<li><a href="logs/{e(p.name)}">{e(p.name)}</a></li>' for p in sorted(DIRS["logs"].glob("*.log"))) if DIRS["logs"].exists() else ""
+    where = "".join(f"<tr><td>{e(a)}</td><td><code>{e(bb)}</code></td></tr>" for a, bb in r["vi_tri"])
+    kind = f" — {e(r['phan_loai'])}" if r["phan_loai"] else ""
+    browser_html = (f"{e(str(b.get('name')))} {e(str(b.get('version')))}<br><small>{e(str(b.get('userAgent')))}</small>"
+                    if b else f"{CHUA} (bước 04 chưa chạy)")
     return f"""<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Báo cáo nghiệm thu Edge</title>
 <style>body{{font:14px/1.5 "Segoe UI",Arial,sans-serif;margin:24px;color:#111;background:#fff}}h1{{font-size:22px}}
 h2{{font-size:17px;margin-top:28px;border-bottom:2px solid #1f5fad;padding-bottom:4px;color:#1f5fad}}
 table{{border-collapse:collapse;width:100%;margin:8px 0}}td,th{{border:1px solid #c8d1dc;padding:5px 8px;text-align:left;vertical-align:top}}
 th{{background:#1f5fad;color:#fff}}.v{{font-size:24px;font-weight:700;color:#fff;background:{color};padding:12px 16px;border-radius:8px}}
 .b{{color:#fff;border-radius:4px;padding:1px 6px;font-size:12px;white-space:nowrap}}img{{max-width:220px;border:1px solid #ccc;margin:2px}}
-details{{margin:8px 0}}summary{{cursor:pointer;font-weight:600}}</style></head><body>
+details{{margin:8px 0}}summary{{cursor:pointer;font-weight:600}}code{{word-break:break-all}}</style></head><body>
 <h1>BÁO CÁO NGHIỆM THU — XUẤT BÁO CÁO TRÊN MICROSOFT EDGE</h1>
-<div class="v">KẾT LUẬN: {e(r['ket_luan'])}</div><ul>{reasons}</ul>
-<p><b>Tổng số bài kiểm thử:</b> {r['tong']} — <b>PASS:</b> {r['pass']} — <b>FAIL:</b> {r['fail']} — <b>Chưa kiểm:</b> {r['chua']}</p>
+<div class="v">KẾT LUẬN: {e(r['ket_luan'])}{kind}</div><ul>{reasons}</ul>
+<p><b>Tổng số bài kiểm thử:</b> {r['tong']} — <b>PASS:</b> {r['pass']} — <b>FAIL:</b> {r['fail']} — <b>{CHUA}:</b> {r['chua']}</p>
 <h2>Thông tin</h2><table>
 <tr><th>Lập lúc</th><td>{e(r['lap_luc'])}</td></tr><tr><th>Người kiểm thử</th><td>{e(r['nguoi_kiem_thu'] or '—')}</td></tr>
 <tr><th>Máy tính</th><td>{e(r['may'])} — {e(r['he_dieu_hanh'])}</td></tr>
-<tr><th>Trình duyệt</th><td>{e(str(b.get('name')))} {e(str(b.get('version')))}<br><small>{e(str(b.get('userAgent')))}</small></td></tr>
+<tr><th>Trình duyệt</th><td>{browser_html}</td></tr>
 <tr><th>Mã nguồn (commit)</th><td>{e(r['commit'])}</td></tr><tr><th>Thư mục kết quả</th><td>{e(r['thu_muc'])}</td></tr></table>
-<h2>Tổng hợp</h2><table><tr><th>Nhóm</th><th>Nội dung</th><th>Tổng</th><th>PASS</th><th>FAIL</th><th>Chưa kiểm</th></tr>{summary}
+<h2>6 bước thực hiện</h2><table><tr><th>Bước</th><th>Trạng thái</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời gian</th><th>Mã thoát</th></tr>{steps}</table>
+<h2>Tổng hợp</h2><table><tr><th>Nhóm</th><th>Nội dung</th><th>Tổng</th><th>PASS</th><th>FAIL</th><th>{CHUA}</th></tr>{summary}
 <tr><td></td><td><b>Tổng cộng</b></td><td><b>{r['tong']}</b></td><td><b>{r['pass']}</b></td><td><b>{r['fail']}</b></td><td><b>{r['chua']}</b></td></tr></table>
 <p>Tiêu chí (tài liệu nghiệm thu, mục 4.5): kiểm thử tự động trên Edge không có FAIL; M01–M12 tất cả PASS
-(M09 có thể "PASS kèm cảnh báo HTTP"). Ngoài ra bộ công cụ yêu cầu chạy đủ các bước và đúng trình duyệt Edge.</p>
+(M09 có thể "PASS kèm cảnh báo HTTP"). Bộ công cụ chỉ kết luận ĐẠT khi chạy đủ các bước, đúng trình duyệt Edge,
+không có bài FAIL và không còn bài {CHUA}.</p>
+<h2>Lỗi môi trường (bước 01)</h2><ul>{env_err}</ul>
 <h2>Chi tiết lỗi</h2><table><tr><th>Mã</th><th>Bài kiểm thử</th><th>Chi tiết</th><th>Ảnh chụp màn hình</th></tr>{err_html}</table>
-<h2>Thời gian thực hiện</h2><table><tr><th>Bước</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời gian</th><th>Mã thoát</th></tr>{steps}</table>
-<table><tr><th>Nhóm kiểm thử tự động</th><th>Nội dung</th><th>Bài</th><th>Thời gian</th></tr>{secs}</table>
+<h2>Thời gian từng nhóm kiểm thử tự động</h2><table><tr><th>Nhóm</th><th>Nội dung</th><th>Bài</th><th>Thời gian</th></tr>{secs}</table>
 <h2>Môi trường (bước 01)</h2><table><tr><th>Mục</th><th>Trạng thái</th><th>Chi tiết</th></tr>{env_rows}</table>
 <h2>Kết quả từng bài</h2>{detail}
-<h2>Log kiểm thử</h2><ul>{logs}</ul>
-<p>File tải về khi kiểm thử: <code>ket_qua_tu_dong\\</code> — kết quả dữ liệu lớn: <code>ket_qua_du_lieu_lon\\</code> —
-các lần chạy trước: <code>lan_chay_truoc\\</code>.</p></body></html>"""
+<h2>Vị trí lưu log và ảnh</h2><table><tr><th>Nội dung</th><th>Thư mục / file</th></tr>{where}</table>
+<h2>Log kiểm thử</h2><ul>{logs}</ul></body></html>"""
 
 
 MANUAL_PORT = 8000  # M07/M09 trong tài liệu nghiệm thu dùng cổng 8000 — giữ nguyên
@@ -976,15 +1078,20 @@ def cmd_tong_hop(log, ask=True, open_report=True, start_server=True):
     elif ask:
         log.line("(Không có bàn phím nhập liệu: bỏ qua phần nhập M01–M12, dùng kết quả đã lưu.)")
     r = build_report()
+    saved = backup([EDGE_DIR / "BAO_CAO_NGHIEM_THU.html", EDGE_DIR / "BAO_CAO_NGHIEM_THU.md",
+                    EDGE_DIR / "ket_qua_tong_hop.json"], "bao_cao")
+    if saved:
+        log.line(f"(Đã sao lưu báo cáo trước đó vào {saved})")
     save_json(EDGE_DIR / "ket_qua_tong_hop.json", r)
     (EDGE_DIR / "BAO_CAO_NGHIEM_THU.md").write_text(render_md(r), encoding="utf-8")
     out = EDGE_DIR / "BAO_CAO_NGHIEM_THU.html"
     out.write_text(render_html(r), encoding="utf-8")
     log.line("")
-    log.line(f"Tổng số bài kiểm thử: {r['tong']} | PASS: {r['pass']} | FAIL: {r['fail']} | Chưa kiểm: {r['chua']}")
+    log.line(f"Tổng số bài kiểm thử: {r['tong']} | PASS: {r['pass']} | FAIL: {r['fail']} | {CHUA}: {r['chua']}")
     for g in r["nhom"]:
-        log.line(f"  {g['ma']}. {g['ten']}: {g['pass']}/{g['tong']} PASS, {g['fail']} FAIL, {g['chua']} chưa kiểm")
-    log.line(f"KẾT LUẬN: {r['ket_luan']}")
+        log.line(f"  {g['ma']}. {g['ten']}: {g['pass']}/{g['tong']} PASS, {g['fail']} FAIL, {g['chua']} {CHUA}")
+    log.line("  6 bước: " + " | ".join(f"{s['ma']} {s['trang_thai']}" for s in r["cac_buoc"]))
+    log.line(f"KẾT LUẬN: {r['ket_luan']}" + (f" — {r['phan_loai']}" if r["phan_loai"] else ""))
     for x in r["ly_do_fail"] + r["ly_do_chua_du"]:
         log.line(f"  - {x}")
     log.line(f"Báo cáo: {out}")
@@ -1014,11 +1121,14 @@ def main(argv=None):
     step, fn = COMMANDS[a.lenh]
     try:
         EDGE_DIR.mkdir(parents=True, exist_ok=True)
+        for key in ("mau", "tu_dong", "lon", "thu_cong", "anh", "logs"):  # thư mục đầu vào/ra luôn tồn tại
+            DIRS[key].mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         print(f"[LỖI] Không tạo được thư mục kết quả {EDGE_DIR}: {exc}")
         return 1
     log = Log(step)
     started = datetime.now()
+    RUN.update(step=step, start=started)
     log.line(f"Thư mục kết quả: {EDGE_DIR}   |   Mã nguồn: {ROOT}")
     try:
         code = (fn(log, ask=not a.khong_hoi, open_report=not a.khong_mo, start_server=not a.khong_may_chu)

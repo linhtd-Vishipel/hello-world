@@ -5,17 +5,19 @@ echo ==================================================================
 echo  BUOC 03: CAI DAT THU VIEN
 echo ==================================================================
 call "%~dp0_chung.bat"
-if errorlevel 1 goto :loi
+set "MA=%ERRORLEVEL%"
+if not "%MA%"=="0" goto :loi
 %PY% "%TOOL%" cai-dat
-if errorlevel 1 goto :loi
+set "MA=%ERRORLEVEL%"
+if not "%MA%"=="0" goto :loi
 echo.
 echo ===== BUOC 03 DAT. Tiep theo: mo file 01_KIEM_TRA_MOI_TRUONG.bat de xac nhan, roi 04_KIEM_THU_EDGE.bat =====
 goto :dung
 :loi
 echo.
-echo ===== BUOC 03 CHUA DAT. Doc thong bao loi o tren, xu ly xong chay lai file nay. =====
+echo ===== BUOC 03 CHUA DAT - ma thoat %MA%. Doc thong bao loi o tren, xu ly xong chay lai file nay. Buoc 04 se KHONG chay khi buoc 03 chua dat. =====
 :dung
 echo Ket qua va log: %NGHIEMTHU_DIR%
 echo.
 pause
-endlocal
+endlocal & exit /b %MA%

@@ -51,9 +51,22 @@ git checkout claude/excel-upload-dashboard-app-xfssug
 
 Sau bước này phải có thư mục: `C:\nghiemthu\ma_nguon\tools\acceptance\windows\` chứa 6 file BAT.
 
-### 1.2 Cài Python 3.11 trở lên
+Về đường dẫn:
 
-1. Mở `https://www.python.org/downloads/windows/`, tải bản **Windows installer (64-bit)** mới nhất.
+- Thư mục mã nguồn **được phép có dấu cách hoặc dấu tiếng Việt**, nhưng nên **ngắn** (ví dụ `C:\nghiemthu\ma_nguon`).
+  Đường dẫn quá dài (như thư mục Downloads lồng nhiều cấp) có thể vượt giới hạn 260 ký tự của Windows
+  khi cài thư viện; bước 01 sẽ cảnh báo.
+- Thư mục kết quả `C:\nghiemthu\edge` **không được có dấu tiếng Việt** (Poppler trên Windows không đọc được);
+  bước 01 báo LỖI nếu vi phạm. Tên tài khoản Windows có dấu (ví dụ `C:\Users\Hùng`) không ảnh hưởng.
+- Không chạy từ ổ mạng (`\\may-chu\...`): chép mã nguồn về ổ đĩa của máy.
+
+### 1.2 Cài Python 3.12 hoặc 3.13 (khuyến nghị)
+
+Bộ công cụ chạy với Python 3.11 trở lên và đã chạy thử với 3.13. Nếu máy có nhiều phiên bản, file BAT tự
+chọn theo thứ tự 3.13 → 3.12 → 3.11 → bản Python 3 mới nhất. Phiên bản quá mới có thể chưa có sẵn
+gói cài đặt cho thư viện (bước 01 sẽ cảnh báo); khi đó cài thêm Python 3.13.
+
+1. Mở `https://www.python.org/downloads/windows/`, chọn bản **Python 3.13.x** (hoặc 3.12.x), tải **Windows installer (64-bit)**.
 2. Chạy file cài, **đánh dấu ô "Add python.exe to PATH"** ở màn hình đầu, rồi bấm **Install Now**.
 3. Kiểm tra: mở Command Prompt **mới**, gõ `py -3 --version` → hiện `Python 3.1x.x`.
 
@@ -114,8 +127,12 @@ Tạo 6 file Excel mẫu vào `C:\nghiemthu\edge\mau\`. Lần đầu máy tạo 
 
 ### Bước 03 — `03_CAI_DAT_THU_VIEN.bat`
 
-Cài thư viện cho Web App và bộ kiểm thử, sau đó **mở thử Microsoft Edge** bằng Playwright.
+Cài thư viện cho Web App và bộ kiểm thử (vào môi trường riêng `C:\nghiemthu\cong_cu\venv`, không ảnh hưởng
+Python của máy), cài Playwright bằng `npm ci`, sau đó **mở thử Microsoft Edge** bằng Playwright.
 Đạt khi có dòng bắt đầu bằng `OK <phiên bản Edge>` và dòng `KẾT LUẬN: ĐẠT`. Chạy lại 01 để xác nhận mọi mục `[ OK ]`.
+
+Chỉ khi bước 03 thành công trọn vẹn, máy mới ghi nhận `C:\nghiemthu\edge\cai_dat_thanh_cong.json`.
+**Bước 04 và 05 từ chối chạy** nếu chưa có ghi nhận này (ví dụ `pip`/`npm ci` lỗi, hoặc không mở được Edge).
 
 ### Bước 04 — `04_KIEM_THU_EDGE.bat`
 
@@ -146,7 +163,7 @@ Kết thúc hiện `KẾT QUẢ ĐỐI CHIẾU: x/y PASS` và `KẾT QUẢ DỮ 
    | `P` | PASS — đúng như mong đợi |
    | `F` | FAIL — máy hỏi **mô tả lỗi (bắt buộc)** |
    | `C` | Chỉ có ở **M09**: PASS kèm cảnh báo HTTP (đúng tiêu chí 4.5) |
-   | `B` | Chưa kiểm (bỏ qua lần này) |
+   | `B` | Chưa kiểm thử (bỏ qua lần này) — báo cáo ghi **CHƯA KIỂM THỬ** |
    | Enter | Giữ kết quả đã nhập lần trước |
 
 4. **Ảnh chụp lỗi**: bấm `Windows + Shift + S`, chọn vùng, mở **Paint**, `Ctrl + V`, lưu vào
@@ -163,18 +180,23 @@ kết quả cũ, chỉ nhập bài cần cập nhật. File mẫu để upload n
 
 File `C:\nghiemthu\edge\BAO_CAO_NGHIEM_THU.html` (mở bằng Edge) gồm:
 
-- **Kết luận** và lý do;
-- **Tổng số bài kiểm thử, số PASS, số FAIL, số chưa kiểm** — theo 4 nhóm:
+- **Kết luận ĐẠT hoặc KHÔNG ĐẠT** và lý do;
+- **Tổng số bài kiểm thử, số PASS, số FAIL, số CHƯA KIỂM THỬ** — theo 4 nhóm:
   A. 42 bài giao diện T01–T42 · B. đối chiếu dữ liệu/trình bày file · C. 16 bài dữ liệu lớn · D. 12 bài thủ công M01–M12;
+- **6 bước thực hiện** 01–06: trạng thái (ĐẠT / CÓ LỖI / CHƯA CHẠY), giờ bắt đầu, kết thúc, thời gian, mã thoát;
+- **Lỗi môi trường** (bước 01), nếu có;
 - **Chi tiết từng lỗi** kèm **ảnh chụp màn hình** (bấm vào ảnh để phóng to);
-- **Thời gian thực hiện** từng bước 01–06 và từng nhóm kiểm thử tự động;
-- Kết quả môi trường (bước 01), kết quả từng bài, danh sách **log**.
+- **Thời gian** từng nhóm kiểm thử tự động; kết quả từng bài;
+- **Vị trí lưu log và ảnh** (đường dẫn đầy đủ) và danh sách **log**.
+
+Bài nào chưa thực hiện được ghi **CHƯA KIỂM THỬ** (nếu bước 04 chưa chạy, báo cáo vẫn liệt kê đủ T01–T42 với
+trạng thái này). Không có bài nào được ghi PASS nếu chưa thực sự chạy.
 
 | Kết luận | Ý nghĩa |
 |---|---|
-| **ĐẠT** | Mọi bài PASS (M09 có thể "PASS kèm cảnh báo HTTP"), chạy trên Microsoft Edge, đủ các bước |
-| **KHÔNG ĐẠT** | Có ít nhất một bài FAIL |
-| **CHƯA ĐỦ ĐIỀU KIỆN KẾT LUẬN** | Không có FAIL nhưng còn bài chưa kiểm, bước chưa chạy, kết quả 05 cũ hơn 04, hoặc không chạy trên Edge |
+| **ĐẠT** | Mọi bài PASS (M09 có thể "PASS kèm cảnh báo HTTP"), chạy trên Microsoft Edge, đủ các bước, không còn bài CHƯA KIỂM THỬ, không có lỗi môi trường |
+| **KHÔNG ĐẠT — CÓ BÀI FAIL / LỖI** | Có ít nhất một bài FAIL, hoặc bước 01 còn lỗi môi trường |
+| **KHÔNG ĐẠT — CHƯA ĐỦ ĐIỀU KIỆN** | Không có FAIL nhưng còn bài CHƯA KIỂM THỬ, bước chưa chạy, kết quả 05 cũ hơn 04, hoặc không chạy trên Edge |
 
 Bản Markdown `BAO_CAO_NGHIEM_THU.md` và dữ liệu `ket_qua_tong_hop.json` có cùng nội dung.
 
@@ -188,14 +210,46 @@ C:\nghiemthu\edge\
 ├─ ket_qua_tong_hop.json             số liệu tổng hợp
 ├─ moi_truong.json                   kết quả bước 01
 ├─ trang_thai_cac_buoc.json          thời gian, mã thoát từng bước
+├─ cai_dat_thanh_cong.json           ghi nhận bước 03 đạt (điều kiện để chạy 04, 05)
 ├─ mau\                              6 file Excel mẫu
 ├─ ket_qua_tu_dong\                  file tải về (Excel/PDF/Word), ảnh loi_*.png, ui_*.png, kết quả 04 + 05
 ├─ ket_qua_du_lieu_lon\              kết quả kiểm tra dữ liệu lớn
 ├─ thu_cong\ket_qua_thu_cong.json    kết quả M01–M12;  thu_cong\anh\  ảnh chụp lỗi thủ công
 ├─ du_lieu_may_chu\, du_lieu_thu_cong\   dữ liệu Web App khi kiểm thử
 ├─ logs\                             01_...log → 06_...log, may_chu_*.log
-└─ lan_chay_truoc\<thời điểm>\       kết quả các lần chạy trước (không bị xoá)
+└─ lan_chay_truoc\<thời điểm>\       kết quả, mẫu, báo cáo, kết quả M01–M12 các lần trước (không bị xoá)
 ```
+
+**An toàn dữ liệu:** bộ công cụ không xoá và không ghi đè dữ liệu. Trước khi tạo lại dữ liệu mẫu (02),
+chạy lại kiểm thử (04, 05), cập nhật kết quả M01–M12 hay lập lại báo cáo (06), bản cũ được chuyển/sao lưu vào
+`lan_chay_truoc\<thời điểm>\`. Bộ công cụ không sửa mã nguồn Web App, không ghi `__pycache__` vào thư mục mã nguồn,
+không chạy lệnh Git nào ngoài việc đọc mã commit để ghi vào báo cáo.
+
+### Mã thoát của file BAT
+
+Mỗi file BAT in `ma thoat` khi chưa đạt và trả đúng mã thoát của chương trình bên trong:
+
+| Mã | Ý nghĩa |
+|---|---|
+| 0 | Bước đạt |
+| 1 | Có bài FAIL, thiếu điều kiện, hoặc lỗi được mô tả trong cửa sổ/log |
+| 2 | Không mở được trình duyệt / dừng bất thường (bước 04), hoặc thiếu file `nghiemthu.py` |
+| 124 | Một lệnh chạy quá thời gian cho phép và đã bị dừng |
+| 127 | Không chạy được một chương trình cần thiết |
+| 130 | Người dùng bấm Ctrl+C |
+| 9009 | Không tìm thấy Python |
+
+### Biến môi trường (chỉ dùng khi cần thay đổi mặc định)
+
+Đặt bằng lệnh `setx TEN_BIEN "gia tri"` trong Command Prompt, rồi **mở lại** file BAT:
+
+| Biến | Mặc định | Dùng khi |
+|---|---|---|
+| `NGHIEMTHU_DIR` | `C:\nghiemthu\edge` | Muốn lưu kết quả ở thư mục khác (không dấu tiếng Việt) |
+| `NGHIEMTHU_CONG_CU` | `C:\nghiemthu\cong_cu` | Muốn đặt môi trường Python riêng ở nơi khác |
+| `NGHIEMTHU_PORT` | `8765` | Cổng 8765 bị chương trình khác chiếm (cổng 8000 của bước 06 cố định theo tài liệu M07/M09) |
+| `POPPLER_BIN` | tự tìm | Poppler giải nén ngoài `C:\nghiemthu\cong_cu\poppler` |
+| `NGHIEMTHU_SOFFICE` | tự tìm | LibreOffice cài ngoài `C:\Program Files\LibreOffice` |
 
 Gửi kết quả: chuột phải thư mục `C:\nghiemthu\edge` → **Send to → Compressed (zipped) folder**.
 
@@ -231,4 +285,4 @@ Khi cần hỗ trợ: gửi thư mục `C:\nghiemthu\edge\logs` (hoặc cả th�
   không có Windows. Lần chạy đầu tiên của anh/chị trên Windows là lần kiểm chứng thực tế đầu tiên;
   nếu có lỗi, gửi thư mục `logs` để xử lý.
 - Báo cáo **không bao giờ kết luận ĐẠT** nếu kiểm thử tự động không chạy trên Microsoft Edge
-  (kênh `msedge`) hoặc còn bài M01–M12 chưa kiểm.
+  (kênh `msedge`) hoặc còn bài CHƯA KIỂM THỬ.

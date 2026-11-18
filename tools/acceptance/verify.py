@@ -19,7 +19,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 from datetime import datetime
@@ -154,18 +153,23 @@ def find_soffice():
     return next((c for c in cands if c and os.path.isfile(c)), None)
 
 
-def office_to_pdf(path):
+def office_to_pdf(path, workdir):
     """Convert with LibreOffice (proves the file opens in an office suite).
-    A private profile lets this run even while the user has LibreOffice open."""
+    A private profile lets this run even while the user has LibreOffice open.
+    Output goes under the results folder, not %TEMP%: on Windows Poppler reads
+    its arguments in the ANSI code page, so a user name with Vietnamese letters
+    in C:\\Users\\<name>\\AppData\\Local\\Temp would make pdftotext fail."""
     soffice = find_soffice()
     if not soffice:
         return None
-    d = tempfile.mkdtemp()
-    profile = Path(tempfile.mkdtemp()).as_uri()
+    workdir = Path(workdir)
+    d = workdir / Path(path).stem
+    d.mkdir(parents=True, exist_ok=True)
+    profile = (workdir / "_ho_so_libreoffice").resolve().as_uri()
     env = {**os.environ, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
     subprocess.run([soffice, f"-env:UserInstallation={profile}", "--headless", "--convert-to", "pdf", "--outdir", d, path],
                    capture_output=True, env=env, timeout=600)
-    pdfs = glob.glob(os.path.join(d, "*.pdf"))
+    pdfs = glob.glob(os.path.join(str(d), "*.pdf"))
     return pdfs[0] if pdfs else None
 
 
@@ -357,7 +361,7 @@ def check_layouts(S, OUT):
             widths = [c.width for t in dd_.tables for c in t.columns if c.width]
             narrow = min(widths) / 360000 if widths else 0
             check(label, "Mọi cột bảng rộng ≥ 1,2 cm (chữ không bị xuống dòng từng ký tự)", narrow >= 1.2, f"cột hẹp nhất {narrow:.2f} cm")
-            conv = office_to_pdf(f)
+            conv = office_to_pdf(f, OUT / "_chuyen_doi_office")
             if conv is None:
                 check(label, "Mở được bằng bộ Office (LibreOffice)", False, "LibreOffice không chuyển đổi được file")
                 continue
