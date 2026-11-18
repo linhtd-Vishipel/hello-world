@@ -12,6 +12,8 @@ Bam dup lan luot cac file sau, cho file truoc xong roi moi mo file sau:
 
 Ket qua, log, anh chup loi va bao cao: C:\nghiemthu\edge
 Bao cao: C:\nghiemthu\edge\BAO_CAO_NGHIEM_THU.html
+  -> File bao cao CHI CO sau khi chay xong buoc 06.
+  -> Mo lai ket qua bat ky luc nao: bam dup MO_THU_MUC_KET_QUA.bat
 
 Huong dan day du bang tieng Viet co dau:
   docs\HUONG_DAN_NGHIEM_THU_EDGE_WINDOWS.md  (trong thu muc ma nguon)

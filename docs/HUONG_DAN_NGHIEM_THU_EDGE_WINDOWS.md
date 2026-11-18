@@ -4,6 +4,20 @@ Tài liệu dành cho người thực hiện nghiệm thu, **không cần biết
 các phần mềm ở mục 1 (làm một lần), anh/chị chỉ cần **bấm đúp 6 file BAT theo thứ tự**.
 Mọi kết quả, file tải về, ảnh chụp lỗi, log và báo cáo được lưu trong **`C:\nghiemthu\edge`**.
 
+## Tìm file ở đâu? (đọc trước)
+
+| Cần tìm | Ở đâu | Có từ khi nào |
+|---|---|---|
+| 6 file BAT | `C:\nghiemthu\ma_nguon\tools\acceptance\windows\` — hoặc bấm đúp `C:\nghiemthu\ma_nguon\BAT_DAU_NGHIEM_THU_EDGE.bat` để mở sẵn thư mục này | Sau khi tải mã nguồn (mục 1.1) |
+| Thư mục kết quả | `C:\nghiemthu\edge\` | Sau khi chạy **01** lần đầu |
+| Báo cáo `BAO_CAO_NGHIEM_THU.html` | `C:\nghiemthu\edge\BAO_CAO_NGHIEM_THU.html` | **Chỉ sau khi chạy xong 06** (06 tự mở báo cáo) |
+
+Muốn mở lại kết quả bất kỳ lúc nào: bấm đúp **`MO_THU_MUC_KET_QUA.bat`** (cùng thư mục với 6 file BAT).
+File này mở thư mục `C:\nghiemthu\edge` và mở báo cáo nếu đã có; nếu chưa có, nó cho biết cần chạy bước nào.
+
+> Báo cáo **không có sẵn** trong mã nguồn tải về: nó được tạo trên chính máy của anh/chị khi chạy
+> các bước 01 → 06. Nếu chưa chạy, thư mục `C:\nghiemthu\edge` cũng chưa tồn tại.
+
 | Bước | File | Việc máy làm | Thời gian ước tính |
 |---|---|---|---|
 | 01 | `01_KIEM_TRA_MOI_TRUONG.bat` | Kiểm tra Python, Node.js, Edge, Poppler, LibreOffice, thư viện, cổng mạng, ổ đĩa | ~10 giây |

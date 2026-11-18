@@ -50,10 +50,10 @@ def kit(tmp_path, monkeypatch):
 
 def test_bat_files_exist_with_required_names():
     names = sorted(p.name for p in WIN.glob("*.bat"))
-    assert names == sorted(list(BATS) + ["_chung.bat"])
+    assert names == sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat"])
 
 
-@pytest.mark.parametrize("name", sorted(list(BATS) + ["_chung.bat"]))
+@pytest.mark.parametrize("name", sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat", "../../../BAT_DAU_NGHIEM_THU_EDGE.bat"]))
 def test_bat_file_is_safe_for_cmd(name):
     raw = (WIN / name).read_bytes()
     assert raw.isascii(), "BAT must be ASCII (no code page problems in cmd.exe)"
@@ -263,3 +263,13 @@ def test_port_free_detects_listener_but_not_time_wait(kit):
     cli.close()
     srv.close()
     assert kit.port_free(port) is True  # TIME_WAIT only: free for the next step
+
+
+def test_open_results_helpers_point_to_real_places():
+    opener = (WIN / "MO_THU_MUC_KET_QUA.bat").read_text(encoding="ascii")
+    assert r'set "NGHIEMTHU_DIR=C:\nghiemthu\edge"' in opener
+    assert r'"%NGHIEMTHU_DIR%\BAO_CAO_NGHIEM_THU.html"' in opener
+    launcher = (ROOT / "BAT_DAU_NGHIEM_THU_EDGE.bat").read_text(encoding="ascii")
+    target = re.search(r'explorer "%~dp0([^"]+)"', launcher).group(1)
+    assert (ROOT / target.replace("\\", "/")).is_dir()
+    assert (ROOT / target.replace("\\", "/") / "01_KIEM_TRA_MOI_TRUONG.bat").is_file()
