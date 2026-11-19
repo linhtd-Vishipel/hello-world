@@ -369,7 +369,8 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
     const files = responses.filter((r) => r.url.includes("/api/exports/"));
     const bad = files.filter((r) => r.status === 200 && !/^attachment; filename="BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)"; filename\*=UTF-8''/.test(r.disposition || "") && !r.url.includes("inline=true"));
     const blobDl = await p.evaluate(() => [...document.querySelectorAll("a[href^='blob:']")].length);
-    const notHttp = dlUrls.filter((u) => !/^https?:\/\/[^/]+\/api\/exports\/[\w-]+$/.test(u));
+    // "?inline=true" = PDF preview frame; a browser without a built-in PDF viewer (Playwright's Chromium) downloads it.
+    const notHttp = dlUrls.filter((u) => !/^https?:\/\/[^/]+\/api\/exports\/[\w-]+(\?inline=true)?$/.test(u));
     check("T41", "Tải xuống HTTP chuẩn (không dùng blob:), header Content-Type/Content-Disposition đúng ở mọi lần xuất",
       dlUrls.length > 0 && notHttp.length === 0 && bad.length === 0 && blobDl === 0 && responses.every((r) => r.status !== 500),
       `${dlUrls.length} lượt tải xuống đều từ /api/exports/ (HTTP)` + (notHttp.length ? `; KHÔNG chuẩn: ${notHttp.slice(0, 3).join(", ")}` : "")
