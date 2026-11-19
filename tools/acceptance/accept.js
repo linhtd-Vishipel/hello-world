@@ -130,6 +130,8 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
   p.on("pageerror", (e) => problems.push("pageerror: " + e.message));
   p.on("console", (m) => { if (m.type() === "error") problems.push("console: " + m.text()); });
   const responses = [];
+  const dlUrls = []; // source URL of every browser download (must be http(s)://…/api/exports/…, never blob:)
+  p.on("download", (d) => dlUrls.push(d.url()));
   p.on("response", (r) => {
     if (r.url().includes("/export/") || r.url().includes("/api/exports/")) {
       const h = r.headers();
@@ -367,8 +369,11 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
     const files = responses.filter((r) => r.url.includes("/api/exports/"));
     const bad = files.filter((r) => r.status === 200 && !/^attachment; filename="BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)"; filename\*=UTF-8''/.test(r.disposition || "") && !r.url.includes("inline=true"));
     const blobDl = await p.evaluate(() => [...document.querySelectorAll("a[href^='blob:']")].length);
+    const notHttp = dlUrls.filter((u) => !/^https?:\/\/[^/]+\/api\/exports\/[\w-]+$/.test(u));
     check("T41", "Tải xuống HTTP chuẩn (không dùng blob:), header Content-Type/Content-Disposition đúng ở mọi lần xuất",
-      files.length > 0 && bad.length === 0 && blobDl === 0 && responses.every((r) => r.status !== 500), `${files.length} file tải qua HTTP, ${bad.length} sai, ${blobDl} liên kết blob:`);
+      dlUrls.length > 0 && notHttp.length === 0 && bad.length === 0 && blobDl === 0 && responses.every((r) => r.status !== 500),
+      `${dlUrls.length} lượt tải xuống đều từ /api/exports/ (HTTP)` + (notHttp.length ? `; KHÔNG chuẩn: ${notHttp.slice(0, 3).join(", ")}` : "")
+      + `; ${files.length} phản hồi file kiểm header, ${bad.length} sai; ${blobDl} liên kết blob:`);
     // The browser itself logs every non-2xx response; exactly the two intended
     // over-limit refusals (T28 PDF, T29 Word -> HTTP 422) are expected here.
     const expected422 = problems.filter((m) => /status of 422/.test(m));
