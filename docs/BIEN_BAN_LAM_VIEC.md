@@ -138,3 +138,33 @@ Rà soát 4 loại biểu đồ (thanh ngang, cột, tròn, đường) bằng c�
 Kiểm thử: thêm `test_export_xlsx_chart_layout_title_never_overlaps_axis` (FAIL với mã cũ, PASS với mã mới);
 pytest 184/184 PASS. **Chưa kiểm trên Microsoft Excel thật** — cần xuất lại file Phụ lục 2 và xem TK02, TK03.
 Dấu vân tay mới: **`1ba8d84b6871` (37 file)**.
+
+## Xuất file: file nằm trong Temp thay vì E:\Downloads (Windows 10 + Edge)
+Hiện tượng (người dùng báo): Edge cấu hình tải về `E:\Downloads`, bật "Hỏi nơi lưu mỗi tệp"; Web App báo xuất thành
+công nhưng file nằm trong `C:\Users\Admin\AppData\Local\Temp\MicrosoftEdge...`.
+
+Nguyên nhân phía Web App (đọc mã `excel_dashboard/static/app.js`):
+1. File được tải về trang bằng `fetch`, giữ trong bộ nhớ trình duyệt (`blob:`), rồi tự bấm một liên kết ẩn sau khi
+   chờ máy chủ dựng file — không phải tải xuống HTTP từ máy chủ. Edge xử lý loại này khác tải xuống thường (nguồn
+   `blob:`, không có tên/kiểu file từ máy chủ, hết hiệu lực khi trang tải lại).
+2. Thông báo "Xuất … thành công" / "Trình duyệt đang tải file xuống" được hiện ngay sau khi bấm liên kết ẩn — trang
+   không biết người dùng đã Lưu, Huỷ hay Mở.
+
+Không tái hiện được trên Windows trong môi trường phát triển. `...\Temp\MicrosoftEdge...` là thư mục Edge dùng khi
+file được **mở trực tiếp** (nút "Mở tệp" ở hộp thoại tải xuống, kiểu file đặt "luôn mở", mở tệp Office trong trình
+duyệt) — Web App không ghi vào đó. Hướng dẫn kiểm tra cài đặt Edge đã thêm vào HUONG_DAN mục 5 và 5.1.
+
+Đã sửa:
+- `excel_dashboard/downloads.py` (mới): giữ file báo cáo đã dựng 1 giờ trong bộ nhớ máy chủ (không ghi đĩa, giới hạn
+  512 MB / 100 file); `main.py`: `POST /api/datasets/{id}/export/{fmt}/prepare` và `GET /api/exports/{mã}`
+  (`Content-Disposition: attachment`, đúng tên `BaoCao_…`). API xuất trực tiếp cũ giữ nguyên.
+- `app.js`: tải bằng địa chỉ HTTP đó (chuẩn của trình duyệt: thư mục tải xuống, hộp thoại lưu, Ctrl+J); nút
+  "Tải lại" tải lại đúng bản file đó; xem trước PDF dùng cùng file; thông báo không còn khẳng định "thành công".
+- Nội dung, dữ liệu, thuật toán xuất Excel/PDF/Word không đổi.
+
+Kiểm thử (Linux, Chrome 153 thay cho Edge — chưa phải Windows):
+- pytest 188/188 PASS (thêm 4 bài: tải HTTP cùng file, từ chối/hết hạn, giới hạn bộ nhớ, trang không dùng `blob:`).
+- Bước 04: 42/42 PASS — T09 "Tải lại" giống từng byte; T41: 22/22 lượt tải xuống từ `/api/exports/`, 0 `blob:`.
+- Bước 05: 130 PASS, 0 FAIL, 36 SKIP; dữ liệu lớn 16/16 PASS.
+- **Chưa nghiệm thu trên Windows 10 + Edge**: thư mục lưu, hộp thoại lưu, Ctrl+J, mở bằng Excel/Adobe/Word.
+Dấu vân tay mới: **`ebc8d0d88b04` (38 file)**.
