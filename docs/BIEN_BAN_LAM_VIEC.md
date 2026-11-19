@@ -119,3 +119,22 @@ terminal giả lập với file nguồn **.xls** dạng "Phụ lục 2" (26/12/5
 
 Dấu vân tay mới: **`1fe7c9540b33` (37 file)** — phải tải lại mã nguồn trên Windows.
 Trạng thái: M01–M12 trên Windows **CHƯA KIỂM THỬ** với bản mới; PR #10 **chưa merge**.
+
+## Biểu đồ Excel TK02, TK03: tiêu đề chồng nhãn trục (kiểm tra trực quan trên Windows, file Phụ lục 2)
+Kết quả người dùng kiểm bằng mắt: Tổng quan, TK01, TK04–TK06 đạt; TK02, TK03 tiêu đề chồng nhãn trục;
+Dữ liệu chi tiết 19 dòng, cấu trúc và bộ lọc bình thường.
+
+Nguyên nhân (`excel_dashboard/export.py`, biểu đồ thanh ngang — Web App dùng khi nhóm có hơn 6 mục): trục danh mục
+được đảo (`orientation = maxMin`) để nhóm đầu nằm trên cùng như Dashboard, nhưng không đặt vị trí trục giá trị, nên
+Excel vẽ trục giá trị (và nhãn số) ở **đỉnh** vùng vẽ, ngay dưới tiêu đề. Ngoài ra trục giá trị tự bắt đầu từ giá trị
+gần nhỏ nhất (ví dụ 76), làm chênh lệch giữa các thanh bị phóng đại.
+
+Đã sửa (chỉ phần trình bày biểu đồ trong file Excel xuất; dữ liệu, bảng, công thức, thứ tự sheet, PDF/Word không đổi):
+- thanh ngang: trục giá trị cắt tại danh mục cuối (`crosses = max`) → nhãn số nằm dưới đáy, tách khỏi tiêu đề;
+- biểu đồ cột/thanh/phân bố có giá trị không âm: trục bắt đầu từ 0 (như Dashboard);
+- mọi biểu đồ: tiêu đề đặt phía trên vùng vẽ (`overlay = 0`), không vẽ đè.
+Rà soát 4 loại biểu đồ (thanh ngang, cột, tròn, đường) bằng cách dựng trang LibreOffice: không còn chồng lấn.
+
+Kiểm thử: thêm `test_export_xlsx_chart_layout_title_never_overlaps_axis` (FAIL với mã cũ, PASS với mã mới);
+pytest 184/184 PASS. **Chưa kiểm trên Microsoft Excel thật** — cần xuất lại file Phụ lục 2 và xem TK02, TK03.
+Dấu vân tay mới: **`1ba8d84b6871` (37 file)**.

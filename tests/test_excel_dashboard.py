@@ -334,3 +334,46 @@ def test_docx_wide_table_is_split_not_squeezed(client):
     assert all(len(t.rows) == 6 for t in detail)  # no row lost
     narrowest_cm = min(c.width for t in detail for c in t.columns) / 360000
     assert narrowest_cm >= 1.2
+
+
+def _chart_xml(content):
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(content)) as z:
+        return [z.read(n).decode() for n in sorted(z.namelist()) if n.startswith("xl/charts/chart")]
+
+
+def test_export_xlsx_chart_layout_title_never_overlaps_axis(client):
+    """Regression (Windows acceptance 19/11, TK02/TK03): horizontal bar charts reversed the category
+    axis without moving the value axis, so Excel drew the value labels at the top, under the title."""
+    import re as _re
+
+    ds = _upload(client)
+    many = [{"label": f"Đài thông tin duyên hải số {i}", "value": 80 + i} for i in range(1, 9)]
+    charts = [
+        {"id": "h", "title": "Tổng Doanh thu theo Đơn vị", "type": "hbar", "dimension": "Sản phẩm", "measure": "Doanh thu",
+         "agg": "avg", "dimension_label": "Đơn vị", "value_label": "Điểm", "groups": many},
+        {"id": "b", "title": "Cột", "type": "bar", "dimension": "Sản phẩm", "measure": "Doanh thu", "agg": "avg",
+         "dimension_label": "Đơn vị", "value_label": "Điểm", "groups": many},
+        {"id": "d", "title": "Tỷ trọng", "type": "doughnut", "dimension": "Sản phẩm", "agg": "avg",
+         "dimension_label": "Đơn vị", "value_label": "Điểm", "groups": many[:3]},
+        {"id": "l", "title": "Đường", "type": "line", "dimension": "Sản phẩm", "measure": "Doanh thu", "agg": "avg",
+         "dimension_label": "Đơn vị", "value_label": "Điểm", "groups": many},
+    ]
+    res = client.post(f"/api/datasets/{ds}/export/xlsx", json=_payload(charts=charts))
+    assert res.status_code == 200, res.text
+    hbar, bar, pie, line = _chart_xml(res.content)
+    for x in (hbar, bar, pie, line):
+        assert _re.search(r'<title>.*?<overlay val="0"\s*/>', x, _re.S), "title must sit above the plot area"
+    cat = _re.search(r"<catAx>.*?</catAx>", hbar, _re.S).group(0)
+    val = _re.search(r"<valAx>.*?</valAx>", hbar, _re.S).group(0)
+    assert '<orientation val="maxMin"' in cat  # first group on top, as on the dashboard
+    assert '<crosses val="max"' in val          # value axis at the bottom, away from the title
+    assert '<min val="0"' in val
+    vbar = _re.search(r"<valAx>.*?</valAx>", bar, _re.S).group(0)
+    assert '<min val="0"' in vbar and 'crosses val="max"' not in vbar and "maxMin" not in bar
+    assert "<min " not in line  # line charts keep automatic scaling
+    # Data unchanged: every chart still reads its own sheet's cells.
+    wb = openpyxl.load_workbook(io.BytesIO(res.content))
+    tk = [n for n in wb.sheetnames if n.startswith("TK")]
+    assert len(tk) == 4 and [r[0] for r in wb[tk[0]].iter_rows(min_row=5, values_only=True)][:8] == [g["label"] for g in many]

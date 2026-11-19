@@ -500,8 +500,15 @@ def to_xlsx(rep: Report) -> bytes:
                 chart.type = "bar" if ch.type == "hbar" else "col"
                 chart.gapWidth = 10 if ch.type == "hist" else 60
                 if ch.type == "hbar":
+                    # First group on top (like the dashboard). With the category axis reversed, the
+                    # value axis must cross at the maximum category, otherwise Excel draws it at the
+                    # top of the plot, right under the chart title (labels overlap the title).
                     chart.x_axis.scaling.orientation = "maxMin"
+                    chart.y_axis.crosses = "max"
+                if all((g.value or 0) >= 0 for g in ch.groups):
+                    chart.y_axis.scaling.min = 0  # bars start at zero, as on the dashboard
             chart.title = ch.title
+            chart.title.overlay = False  # title above the plot area, never drawn over it
             chart.width = 18
             chart.height = max(9, min(30, 0.6 * len(ch.groups) + 3)) if ch.type == "hbar" else 9
             chart.add_data(Reference(ws, min_col=2, min_row=hr, max_row=last), titles_from_data=True)
