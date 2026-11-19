@@ -9,7 +9,7 @@ môi trường ảo `C:\nghiemthu\cong_cu\venv`, dữ liệu mẫu và kết qu�
 py -3 "C:\Nghiệm thu_mới\tools\acceptance\nghiemthu.py" kiem-tra
 ```
 
-Sau khi tải lại mã nguồn (bước 1), dòng cuối báo cáo bước 06 phải in dấu vân tay **`ebc8d0d88b04`**.
+Sau khi tải lại mã nguồn (bước 1), dòng cuối báo cáo bước 06 phải in dấu vân tay **`c997702c3786`**.
 Kiểm tra nhanh bản mã nguồn: thư mục `tools\acceptance\windows\` phải có file `M02_DOI_CHIEU_EXCEL.bat`.
 
 ## Thứ tự công việc
@@ -59,14 +59,14 @@ Compress-Archive -Force -DestinationPath C:\nghiemthu\bao_cao_gon.zip -Path `
 | G2 | 0 FAIL, 0 CHƯA KIỂM THỬ (SKIP ghi riêng) | `fail = 0`, `chua = 0`, `skip` |
 | G3 | Microsoft Edge kênh msedge | `trinh_duyet.launch.channel = "msedge"` |
 | G4 | Windows 10/11, không lỗi môi trường | `he_dieu_hanh`, `loi_moi_truong = []` |
-| G5 | Đúng bản bàn giao | `dau_van_tay` bắt đầu bằng `ebc8d0d88b04` |
+| G5 | Đúng bản bàn giao | `dau_van_tay` bắt đầu bằng `c997702c3786` |
 | G6 | M01–M05 PASS (M02 kèm đối chiếu tự động 0 FAIL) | nhóm D |
 
 ### 5. Đối chiếu dấu vân tay mã nguồn
 Phía phát triển (máy có mã nguồn):
 ```bash
 cd tools/acceptance && python3 -c "import nghiemthu as n; print(n.source_fingerprint())"
-# mong đợi: ('ebc8d0d88b04', 38)
+# mong đợi: ('c997702c3786', 38)
 ```
 So với mục "Dấu vân tay mã nguồn" trong `BAO_CAO_NGHIEM_THU.md` từ Windows.
 

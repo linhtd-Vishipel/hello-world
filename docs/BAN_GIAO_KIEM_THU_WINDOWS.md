@@ -10,11 +10,11 @@ Tài liệu này là **hồ sơ bàn giao** cho đợt nghiệm thu thực tế 
 |---|---|
 | Kho mã | `https://github.com/linhtd-Vishipel/hello-world` |
 | Nhánh | `claude/excel-upload-dashboard-app-xfssug` (chưa merge vào `main`) |
-| Dấu vân tay mã nguồn cần kiểm thử | **`ebc8d0d88b04` (38 file)** — báo cáo nghiệm thu in giá trị này ở mục "Dấu vân tay mã nguồn" |
+| Dấu vân tay mã nguồn cần kiểm thử | **`c997702c3786` (38 file)** — báo cáo nghiệm thu in giá trị này ở mục "Dấu vân tay mã nguồn" |
 | `main` tại thời điểm bàn giao | `d8a0b8b` (chưa có thay đổi nào của nhánh này) |
 
 Dấu vân tay là mã băm của toàn bộ mã Web App và bộ nghiệm thu (đã chuẩn hoá xuống dòng), nên tải ZIP hay
-`git clone` đều cho cùng giá trị. **Nếu báo cáo in giá trị khác `ebc8d0d88b04`, bản đã kiểm thử không phải bản bàn giao**
+`git clone` đều cho cùng giá trị. **Nếu báo cáo in giá trị khác `c997702c3786`, bản đã kiểm thử không phải bản bàn giao**
 — cần tải lại đúng nhánh và chạy lại.
 
 ## 2. Phạm vi sẽ phát hành (Pull Request `claude/excel-upload-dashboard-app-xfssug` → `main`)
@@ -76,7 +76,7 @@ Tất cả điều kiện phải đạt; chỉ cần một điều kiện không
 | G2 | **0 FAIL, 0 CHƯA KIỂM THỬ** ở cả 4 nhóm (A 42 bài, B đối chiếu, C 16 bài, D 12 bài M01–M12). Mục SKIP được ghi nhận riêng, không tính là PASS | `fail = 0`, `chua = 0` (số SKIP ở `skip`) |
 | G3 | Chạy trên **Microsoft Edge** qua kênh `msedge` | `trinh_duyet.launch.channel = "msedge"` |
 | G4 | Chạy trên **Windows 10 hoặc 11**, bước 01 không có lỗi môi trường | `he_dieu_hanh`, `loi_moi_truong = []` |
-| G5 | Đúng phiên bản bàn giao | `dau_van_tay` bắt đầu bằng `ebc8d0d88b04` |
+| G5 | Đúng phiên bản bàn giao | `dau_van_tay` bắt đầu bằng `c997702c3786` |
 | G6 | Xuất Excel/PDF/Word được xác nhận: M01, M02, M03, M04, M05 đều PASS | nhóm D |
 | G7 | Pull Request: CI (`Tests`) đạt, không xung đột, chỉ gồm các thay đổi ở mục 2 | trang PR trên GitHub |
 | G8 | Người có thẩm quyền đồng ý hợp nhất (trả lời trong cuộc trao đổi) | tin nhắn xác nhận |
