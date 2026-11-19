@@ -198,9 +198,17 @@ cho mọi báo cáo (ví dụ "Phụ lục 2 Bảng tổng hợp đánh giá ch�
    - (b) mục **Phạm vi Excel** chọn lại sheet đang xem, **không lọc, không sắp xếp**, có bảng thống kê → bấm 📊 Xuất Excel.
 3. Chạy đối chiếu tự động — tới M02 ở bước 06 máy hỏi "Chạy đối chiếu tự động M02 ngay?", bấm **Enter**
    (hoặc chạy riêng **`M02_DOI_CHIEU_EXCEL.bat`** bất kỳ lúc nào):
-   - **File nguồn**: kéo-thả file Excel thực tế vào cửa sổ, bấm Enter;
-   - **File xuất**: máy liệt kê các file `BaoCao_*.xlsx` mới nhất trong thư mục Downloads, gõ số của 2 file vừa xuất
-     (ví dụ `1,2`), bấm Enter, rồi bấm Enter lần nữa để bắt đầu.
+   - **File nguồn** (.xlsx/.xlsm/.xls/.csv): kéo-thả file Excel thực tế vào cửa sổ, hoặc gõ/dán đường dẫn, bấm Enter.
+     Máy in lại tên và đường dẫn file đã nhận.
+   - **File xuất** (.xlsx): máy liệt kê các file `BaoCao_*.xlsx` mới nhất trong **thư mục tải xuống thật của Edge**
+     (kể cả ổ khác, ví dụ `E:\Downloads`) và thư mục của file nguồn. Chọn bằng một trong các cách:
+     - gõ số thứ tự: `1` hoặc `1,2` hoặc `1 2`;
+     - kéo-thả hoặc dán **từng** file, mỗi lần một dòng, Enter;
+     - dán nhiều đường dẫn trên một dòng (cách nhau dấu cách, dấu phẩy, chấm phẩy; có hoặc không có ngoặc kép).
+     Máy in "→ Nhận file xuất 1: …" cho từng file. Bấm Enter trên dòng trống để bắt đầu đối chiếu.
+   - File bị từ chối luôn kèm **lý do cụ thể**: không tìm thấy (kèm thư mục và file gần giống), sai định dạng
+     (.xls/.csv là file nguồn), là thư mục, trùng file nguồn, không đọc được (đang mở trong Excel), nội dung không phải
+     .xlsx. Ký tự vô hình khi chép đường dẫn (ví dụ từ hộp thoại Properties) được tự loại bỏ.
 4. Máy chỉ **đọc** file (không sửa file nguồn, không thêm dữ liệu) và kiểm tra cho **từng sheet**:
 
    | Nội dung | Cách kiểm |

@@ -606,3 +606,122 @@ def test_m02_command_without_files_is_not_tested(kit, monkeypatch):
     log.close()
     assert "M02 CHƯA KIỂM THỬ" in log.path.read_text(encoding="utf-8")
     assert not kit.M02_FILE.exists()
+
+
+# ---------------------------------------------------------------------------
+# M02: picking files at the prompt (bug report 19/11: valid .xlsx path rejected)
+# ---------------------------------------------------------------------------
+
+
+def _xlsx_file(path):
+    import openpyxl
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb = openpyxl.Workbook()
+    wb.active.append(["a"])
+    wb.save(path)
+    return path
+
+
+def _feed(monkeypatch, kit, answers):
+    it = iter(answers)
+    out = []
+
+    def fake_input(prompt=""):
+        a = next(it)
+        out.append(f"{prompt}{a}")
+        return a
+    monkeypatch.setattr("builtins.input", fake_input)
+    return out
+
+
+def test_m02_clean_input_and_split_paths(kit):
+    ci, sp = kit.clean_input, kit.split_paths
+    assert ci("\u202aE:\\Downloads\\a.xlsx\u200e ") == ("E:\\Downloads\\a.xlsx", ["U+200E", "U+202A"])
+    assert ci("& 'E:\\x y.xlsx'")[0] == "'E:\\x y.xlsx'"
+    w1, w2 = r"E:\Downloads\BaoCao_PhuLuc2_20261119_1623.xlsx", r"E:\Downloads\BaoCao_PhuLuc2_20261119_1624.xlsx"
+    assert sp(f"{w1} {w2}") == [w1, w2]
+    assert sp(f"{w1},{w2}") == [w1, w2] and sp(f"{w1}; {w2}") == [w1, w2]
+    assert sp(f'"{w1}" "{w2}"') == [w1, w2]
+    v = r"E:\1. Kỹ thuật\7. BCKT\Báo cáo tháng 2.xlsx"
+    assert sp(f'"{v}"') == [v] and sp(f"'{v}'") == [v]
+    assert sp(f"{v} E:\\Tải về\\b c.xlsx") == [v, r"E:\Tải về\b c.xlsx"]
+
+
+def test_m02_why_not_file_gives_specific_reasons(kit, tmp_path):
+    ok = _xlsx_file(tmp_path / "Tải về" / "BaoCao_Phụ lục 2_1623.xlsx")
+    src = tmp_path / "nguon.xls"
+    src.write_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 100)
+    fake = tmp_path / "gia.xlsx"
+    fake.write_text("không phải excel")
+    pdf = tmp_path / "BaoCao.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    w = kit.why_not_file
+    assert w(ok, (".xlsx",), src) is None
+    assert w(src, kit.SOURCE_EXT) is None
+    assert "file .xls/.csv là FILE NGUỒN" in w(src, (".xlsx",))
+    assert "định dạng .pdf" in w(pdf, (".xlsx",))
+    assert "không phải file Excel .xlsx" in w(fake, (".xlsx",))
+    assert "thư mục" in w(tmp_path, (".xlsx",))
+    assert "không tìm thấy file" in w(tmp_path / "Tải về" / "BaoCao_Phụ lục 2_9999.xlsx", (".xlsx",))
+    assert "gần giống" in w(tmp_path / "Tải về" / "BaoCao_Phụ lục 2_9999.xlsx", (".xlsx",))
+    assert "không tìm thấy thư mục" in w(tmp_path / "khong_co" / "a.xlsx", (".xlsx",))
+    assert "chính là file nguồn" in w(ok, (".xlsx",), ok)
+
+
+def test_m02_prompt_accepts_one_two_quoted_vietnamese_paths(kit, tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "khong_co"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setattr(kit.Path, "home", lambda: tmp_path / "user")
+    d = tmp_path / "E" / "1. Kỹ thuật" / "Tải về"
+    a = _xlsx_file(d / "BaoCao_PhuLuc2_20261119_1623.xlsx")
+    b = _xlsx_file(d / "BaoCao_PhuLuc2_20261119_1624.xlsx")
+    src = tmp_path / "E" / "1. Kỹ thuật" / "7. BCKT" / "Phu luc 2 Bang tong hop 2.2024.xls"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 100)
+    log = kit.Log("M02")
+    cases = [
+        ([str(a), ""], [a]),                                   # one path, typed
+        ([f'"{a}"', f'"{b}"', ""], [a, b]),                    # drag-and-drop, one per line (quoted)
+        ([f'"{a}" "{b}"', ""], [a, b]),                         # two quoted paths on one line
+        ([f"{a},{b}", ""], [a, b]),                             # comma separated
+        (["\u202a" + str(a), ""], [a]),                         # invisible char from copy/paste
+        ([f"& '{a}'", ""], [a]),                                # PowerShell drag-and-drop
+        ([str(d / "khong_co.xlsx"), str(src), str(a), str(a), ""], [a]),  # missing, source .xls, ok, duplicate
+    ]
+    for answers, expected in cases:
+        out = _feed(monkeypatch, kit, answers)
+        assert kit.ask_export_files(log, src) == expected, (answers, out)
+    log.close()
+
+
+def test_m02_prompt_numbers_from_real_download_folder(kit, tmp_path, monkeypatch):
+    """Edge downloads to another drive (E:\\Downloads): read it from Edge's Preferences."""
+    dl = tmp_path / "E" / "Downloads"
+    a = _xlsx_file(dl / "BaoCao_PhuLuc2_20261119_1623.xlsx")
+    time.sleep(0.02)
+    b = _xlsx_file(dl / "BaoCao_PhuLuc2_20261119_1624.xlsx")
+    prefs = tmp_path / "local" / "Microsoft" / "Edge" / "User Data" / "Default" / "Preferences"
+    prefs.parent.mkdir(parents=True)
+    prefs.write_text(json.dumps({"download": {"default_directory": str(dl)}}), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    assert kit.downloads_dirs()[0] == dl
+    log = kit.Log("M02")
+    _feed(monkeypatch, kit, ["9", "1,2", ""])
+    assert kit.ask_export_files(log, None) == [b, a]
+    _feed(monkeypatch, kit, ["2 1", ""])
+    assert kit.ask_export_files(log, None) == [a, b]
+    log.close()
+    text = log.path.read_text(encoding="utf-8")
+    assert "1. BaoCao_PhuLuc2_20261119_1624.xlsx" in text and str(dl) in text
+
+
+def test_m02_source_prompt_reasons(kit, tmp_path, monkeypatch, capsys):
+    src = tmp_path / "Phụ lục 2 đánh giá.xls"
+    src.write_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 100)
+    _feed(monkeypatch, kit, [str(tmp_path / "x.pdf"), f'"{src}" "{src}"', f'"{src}"'])
+    assert kit._ask_path("File nguồn: ") == src
+    out = capsys.readouterr().out
+    assert "không tìm thấy file" in out and "chỉ nhập MỘT file nguồn" in out and "Nhận file nguồn: Phụ lục 2 đánh giá.xls" in out
+    assert "Chuỗi đã nhập:" in out

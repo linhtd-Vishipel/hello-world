@@ -807,19 +807,167 @@ def backup(paths, sub):
 M02_FILE = DIRS["thu_cong"] / "m02_doi_chieu_excel.json"
 
 
+SOURCE_EXT = (".xlsx", ".xlsm", ".xls", ".csv")  # định dạng Web App nhận upload
+_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\|(?:(?<=^)|(?<=[\s,;]))/).*?\.(?:xlsx|xlsm|xls|csv)(?=$|[\s,;\"'])",
+                      re.IGNORECASE)  # E:\..., \\máy\..., /đường/dẫn (thử trên Linux)
+
+
+def clean_input(raw):
+    """Bỏ ký tự vô hình (U+202A khi chép đường dẫn từ hộp thoại Properties, U+200E, BOM…), khoảng trắng
+    và dấu ngoặc ở hai đầu; bỏ tiền tố "& " khi kéo-thả vào cửa sổ PowerShell. Trả về (chuỗi sạch, ký tự đã bỏ)."""
+    import unicodedata
+
+    removed = sorted({f"U+{ord(c):04X}" for c in raw if unicodedata.category(c) == "Cf"})
+    text = "".join(c for c in raw if unicodedata.category(c) != "Cf").strip()
+    if text.startswith("& "):
+        text = text[2:].strip()
+    return text, removed
+
+
+def split_paths(text):
+    """Một dòng nhập → danh sách đường dẫn. Nhận: 1 đường dẫn (có/không ngoặc kép hoặc ngoặc đơn),
+    nhiều đường dẫn cách nhau bởi khoảng trắng, dấu phẩy hoặc chấm phẩy, có/không ngoặc."""
+    text = text.strip()
+    whole = text.strip().strip('"').strip("'").strip()
+    if whole and Path(whole).exists():
+        return [whole]
+    quoted = re.findall(r'"([^"]+)"|\'([^\']+)\'', text)
+    if quoted:
+        return [a or b for a, b in quoted]
+    found = _PATH_RE.findall(text)
+    if found:
+        return [f.strip() for f in found]
+    parts = [x.strip().strip('"').strip("'").strip() for x in re.split(r"[,;]", text)]
+    return [x for x in parts if x]
+
+
+def why_not_file(p, kinds, other=None):
+    """None nếu dùng được, nếu không thì lý do cụ thể (tiếng Việt)."""
+    if not p.exists():
+        parent = p.parent
+        if p.drive and not Path(p.drive + "\\").exists():
+            return f"không có ổ đĩa {p.drive}"
+        if not parent.exists():
+            return f"không tìm thấy thư mục {parent}"
+        near = sorted(x.name for x in parent.glob(p.stem[:12] + "*") if x.is_file())[:3]
+        return f"không tìm thấy file trong {parent}" + (f" (có file gần giống: {', '.join(near)})" if near else "")
+    if p.is_dir():
+        return "đây là thư mục, không phải file"
+    if p.suffix.lower() not in kinds:
+        hint = " — file .xls/.csv là FILE NGUỒN; Web App chỉ xuất file .xlsx" if kinds == (".xlsx",) and p.suffix.lower() in SOURCE_EXT else ""
+        return f"định dạng {p.suffix or '(không có đuôi)'} không được nhận (cần {', '.join(kinds)}){hint}"
+    if other is not None and p.resolve() == Path(other).resolve():
+        return "đây chính là file nguồn, không phải file xuất"
+    try:
+        with open(p, "rb") as fh:
+            head = fh.read(8)
+    except PermissionError:
+        return "không có quyền đọc hoặc file đang bị khoá — đóng file trong Excel rồi thử lại"
+    except OSError as exc:
+        return f"không đọc được: {exc}"
+    if p.suffix.lower() in (".xlsx", ".xlsm") and not head.startswith(b"PK"):
+        return "nội dung không phải file Excel .xlsx (có thể tải dở hoặc bị đổi đuôi)"
+    if p.suffix.lower() == ".xls" and not head.startswith(b"\xd0\xcf\x11\xe0"):
+        return "nội dung không phải file Excel .xls"
+    return None
+
+
+def downloads_dirs():
+    """Các thư mục tải xuống thực tế: thư mục tải xuống cấu hình trong Edge (có thể ở ổ khác, ví dụ
+    E:\\Downloads), rồi Downloads của người dùng."""
+    out = []
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        for pref in sorted(Path(local, "Microsoft", "Edge", "User Data").glob("*/Preferences")):
+            try:
+                d = json.loads(pref.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            for key in ("download", "savefile"):
+                v = (d.get(key) or {}).get("default_directory")
+                if v:
+                    out.append(Path(v))
+    out.append(Path(os.environ.get("USERPROFILE") or Path.home()) / "Downloads")
+    seen, res = set(), []
+    for d in out:
+        k = str(d).lower()
+        if k not in seen and d.is_dir():
+            seen.add(k)
+            res.append(d)
+    return res
+
+
 def downloads_dir():
-    return Path(os.environ.get("USERPROFILE") or Path.home()) / "Downloads"
+    return (downloads_dirs() or [Path(os.environ.get("USERPROFILE") or Path.home()) / "Downloads"])[0]
 
 
-def _ask_path(prompt):
+def recent_exports(extra_dirs=()):
+    found = {}
+    for d in list(downloads_dirs()) + [Path(x) for x in extra_dirs]:
+        try:
+            for p in d.glob("BaoCao_*.xlsx"):
+                found[str(p.resolve()).lower()] = p
+        except OSError:
+            continue
+    return sorted(found.values(), key=lambda p: p.stat().st_mtime, reverse=True)[:9]
+
+
+def _ask_path(prompt, log=None):
+    say = log.line if log else print
+    """File nguồn: một đường dẫn (kéo-thả hoặc gõ), báo lý do cụ thể khi từ chối."""
     while True:
-        raw = input(prompt).strip().strip('"').strip()
-        if not raw:
+        text, removed = clean_input(input(prompt))
+        if not text:
             return None
-        p = Path(raw)
-        if p.is_file():
+        paths = split_paths(text)
+        if len(paths) != 1:
+            say(f"      Từ chối: nhận được {len(paths)} đường dẫn — chỉ nhập MỘT file nguồn.")
+            continue
+        p = Path(paths[0])
+        reason = why_not_file(p, SOURCE_EXT)
+        if reason is None:
+            say(f"      → Nhận file nguồn: {p.name}\n        Đường dẫn: {p}")
             return p
-        print(f"      Không thấy file: {raw} — nhập lại (Enter để bỏ qua).")
+        say(f"      Từ chối {p}: {reason}." + (f" Chuỗi đã nhập: {ascii(text)}" if reason.startswith("không tìm thấy") else "") + (f" (Đã bỏ ký tự vô hình {', '.join(removed)}.)" if removed else ""))
+
+
+def ask_export_files(log, src):
+    """File xuất: gõ số thứ tự trong danh sách, hoặc kéo-thả/gõ từng đường dẫn (mỗi lần một hoặc nhiều file)."""
+    recent = recent_exports([src.parent] if src else [])
+    if recent:
+        log.line("File Excel xuất gần nhất (BaoCao_*.xlsx) tìm thấy trong: " + ", ".join(str(d) for d in downloads_dirs()))
+        for i, p in enumerate(recent, 1):
+            log.line(f"   {i}. {p.name}  ({datetime.fromtimestamp(p.stat().st_mtime):%d/%m/%Y %H:%M})  — {p.parent}")
+    else:
+        log.line("Không tìm thấy file BaoCao_*.xlsx trong thư mục tải xuống: "
+                 + (", ".join(str(d) for d in downloads_dirs()) or "(không xác định)") + ". Hãy kéo-thả từng file.")
+    log.line("Chọn file xuất: " + ("gõ số thứ tự (ví dụ 1 hoặc 1,2), hoặc " if recent else "")
+             + "kéo-thả / dán đường dẫn từng file rồi Enter (có thể nhiều lần). Enter trên dòng trống để bắt đầu đối chiếu.")
+    say = log.line
+    files = []
+    while True:
+        text, removed = clean_input(input(f"   File xuất ({len(files)} đã chọn): "))
+        if not text:
+            return files
+        picks = [x.strip() for x in re.split(r"[,;\s]+", text) if x.strip()]
+        if picks and all(x.isdigit() for x in picks):
+            bad = [x for x in picks if not 1 <= int(x) <= len(recent)]
+            if bad:
+                say(f"      Từ chối: số {', '.join(bad)} không có trong danh sách"
+                      + (f" (chỉ có 1–{len(recent)})." if recent else " (danh sách trống — hãy kéo-thả file)."))
+                continue
+            cands = [recent[int(x) - 1] for x in picks]
+        else:
+            cands = [Path(x) for x in split_paths(text)]
+        for p in cands:
+            reason = why_not_file(p, (".xlsx",), src)
+            if reason:
+                say(f"      Từ chối {p}: {reason}." + (f" Chuỗi đã nhập: {ascii(text)}" if reason.startswith("không tìm thấy") else "") + (f" (Đã bỏ ký tự vô hình {', '.join(removed)}.)" if removed else ""))
+            elif any(p.resolve() == f.resolve() for f in files):
+                say(f"      Bỏ qua {p.name}: đã chọn rồi.")
+            else:
+                files.append(p)
+                say(f"      → Nhận file xuất {len(files)}: {p.name}\n        Đường dẫn: {p}")
 
 
 def m02_state():
@@ -843,32 +991,28 @@ def cmd_doi_chieu_excel(log, nguon=None, xuat=None):
     files = [Path(x) for x in (xuat or [])]
     if not src and interactive:
         log.line("Kéo-thả FILE EXCEL NGUỒN (file đã upload lên Web App) vào cửa sổ này rồi bấm Enter.")
-        src = _ask_path("   File nguồn: ")
+        src = _ask_path("   File nguồn: ", log)
     if not files and interactive:
-        recent = sorted(downloads_dir().glob("BaoCao_*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)[:9]
-        if recent:
-            log.line(f"File Excel xuất gần nhất trong {downloads_dir()}:")
-            for i, p in enumerate(recent, 1):
-                log.line(f"   {i}. {p.name}  ({datetime.fromtimestamp(p.stat().st_mtime):%d/%m/%Y %H:%M})")
-        log.line("Chọn file xuất: gõ số thứ tự (nhiều file cách nhau dấu phẩy, ví dụ 1,2) hoặc kéo-thả từng file, Enter để kết thúc.")
-        while True:
-            raw = input("   File xuất: ").strip().strip('"').strip()
-            if not raw:
-                break
-            picks = [x.strip() for x in raw.split(",")]
-            if all(x.isdigit() and 1 <= int(x) <= len(recent) for x in picks):
-                files += [recent[int(x) - 1] for x in picks]
-            elif Path(raw).is_file():
-                files.append(Path(raw))
-            else:
-                print("      Không hợp lệ, nhập lại.")
-    missing = ([] if src and src.is_file() else ["file nguồn"]) + ([] if files and all(f.is_file() for f in files) else ["file xuất"])
-    if missing:
-        log.line(f"[LỖI] Chưa có {' và '.join(missing)} — M02 CHƯA KIỂM THỬ (không ghi PASS).")
-        return 1
-    log.line(f"    File nguồn: {src}")
+        files = ask_export_files(log, src)
+    problems = []
+    if not src:
+        problems.append("chưa chọn file nguồn")
+    elif why_not_file(src, SOURCE_EXT):
+        problems.append(f"file nguồn {src}: {why_not_file(src, SOURCE_EXT)}")
+    if not files:
+        problems.append("chưa chọn file xuất")
     for f in files:
-        log.line(f"    File xuất : {f}")
+        r = why_not_file(f, (".xlsx",), src)
+        if r:
+            problems.append(f"file xuất {f}: {r}")
+    if problems:
+        for x in problems:
+            log.line(f"[LỖI] {x}")
+        log.line("M02 CHƯA KIỂM THỬ (không ghi PASS).")
+        return 1
+    log.line(f"    File nguồn: {src.name}  ({src.stat().st_size // 1024} KB) — {src}")
+    for i, f in enumerate(files, 1):
+        log.line(f"    File xuất {i}: {f.name}  ({f.stat().st_size // 1024} KB) — {f}")
     log.line("    Chỉ đọc, không sửa file nguồn và file xuất.")
     code = log.run([VPY, ACC / "m02_excel.py", "--nguon", src] + sum((["--xuat", f] for f in files), [])
                    + ["--out", DIRS["thu_cong"]], cwd=ACC, timeout=1800)

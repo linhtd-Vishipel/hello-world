@@ -81,3 +81,41 @@ Mã Web App (`excel_dashboard/`) **không thay đổi** hôm nay.
 | Phạm vi so với `main` | 46 file, chỉ thêm dòng, không xung đột |
 | Pull Request | **#10** https://github.com/linhtd-Vishipel/hello-world/pull/10 — mở, CI `test` đạt, **không merge** |
 | Dấu vân tay bàn giao | **`8f20a1d16f9d` (37 file)** |
+
+
+---
+
+# Ngày 19/11/2026
+
+## Xác minh phiên bản
+- Windows báo `('d128bc94a9f4', 35)` = bản `8de1f39`/`fc93499` (trước M02). ZIP GitHub của nhánh tại `da87cf9`
+  tính được `('8f20a1d16f9d', 37)`: máy Windows lúc đó đang dùng thư mục mã nguồn cũ. Không đổi thuật toán dấu vân tay.
+- Người dùng sau đó chạy `M02_DOI_CHIEU_EXCEL.bat` trên Windows 10 với bản `8f20a1d16f9d`.
+
+## Lỗi M02: không nhận file Excel xuất hợp lệ (Windows 10)
+File nguồn `E:\1. Kỹ thuật\7. BCKT\Phu luc 2 Bang tong hop danh gia chat luong 2.2024.xls` được nhận; 2 file xuất
+`E:\Downloads\BaoCao_PhuLuc2BangTongHopDanhGiaChatLuong2024_20261119_1623.xlsx` / `_1624.xlsx` bị báo "Không hợp lệ".
+
+Nguyên nhân (đọc mã `nghiemthu.py` bản `8f20a1d16f9d`):
+1. **Xác định chắc chắn** — hai đường dẫn trên một dòng: mã cũ coi cả dòng là MỘT đường dẫn → không tồn tại → "Không hợp lệ".
+2. **Xác định chắc chắn** — danh sách chọn theo số chỉ tìm trong `%USERPROFILE%\Downloads`; Edge tải về `E:\Downloads`
+   nên danh sách trống, gõ số luôn bị từ chối.
+3. **Chưa tái hiện được** — một đường dẫn đơn bị từ chối: với chuỗi `E:\Downloads\...xlsx` thuần, mã cũ phải nhận.
+   Khả năng: chuỗi có ký tự vô hình khi chép (U+202A…), ký tự thừa (dấu phẩy, ngoặc đơn, tiền tố `& ` của PowerShell)
+   hoặc nhập nhầm ô. Mã cũ chỉ in "Không hợp lệ" nên không còn dấu vết để xác định.
+
+Đã sửa (`nghiemthu.py`, không đổi `m02_excel.py` — thuật toán và tiêu chí đối chiếu giữ nguyên):
+- loại ký tự vô hình, khoảng trắng, ngoặc kép/đơn, tiền tố `& `; nhận một hoặc nhiều đường dẫn một dòng;
+- danh sách theo số lấy từ thư mục tải xuống cấu hình trong Edge + Downloads + thư mục file nguồn;
+- kiểm tra tồn tại, thư mục, đuôi file, trùng file nguồn, quyền đọc/khoá, chữ ký nội dung .xlsx/.xls;
+- từ chối luôn kèm lý do cụ thể (và chuỗi đã nhập khi không tìm thấy), ghi vào log `logs\M02_m02_doi_chieu_excel.log`;
+- in rõ tên + đường dẫn + dung lượng từng file được nhận.
+
+Kiểm thử (Linux — **chưa chạy trên Windows CMD**): pytest 183/183 (Python 3.13 và 3.11); thêm 5 bài cho phần nhập file
+(1 file, 2 file, ngoặc kép, tiếng Việt + khoảng trắng, ký tự vô hình, `& '...'`, file không tồn tại, sai định dạng,
+nội dung giả, thư mục, trùng file nguồn, số ngoài danh sách, thư mục tải xuống của Edge ở ổ khác). Chạy thử qua
+terminal giả lập với file nguồn **.xls** dạng "Phụ lục 2" (26/12/5 dòng): nhận đủ 2 file xuất, M02 tự động
+54 PASS, 0 FAIL, 1 SKIP (bản "toàn bộ sheet" không có biểu đồ — không áp dụng).
+
+Dấu vân tay mới: **`1fe7c9540b33` (37 file)** — phải tải lại mã nguồn trên Windows.
+Trạng thái: M01–M12 trên Windows **CHƯA KIỂM THỬ** với bản mới; PR #10 **chưa merge**.
