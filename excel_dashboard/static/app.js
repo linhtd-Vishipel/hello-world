@@ -723,34 +723,25 @@
     };
   }
 
-  function filenameFrom(disposition) {
-    if (!disposition) return null;
-    const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
-    if (star) { try { return decodeURIComponent(star[1]); } catch (_) {} }
-    const plain = /filename="([^"]+)"/i.exec(disposition);
-    return plain ? plain[1] : null;
-  }
-
-  // The last generated file stays available through a visible link: browsers
-  // may block an automatic download that starts after a long export (the
-  // user-gesture window has expired) or when several files are downloaded in a
-  // row, and a page cannot detect that. The link is a fresh user click.
-  let lastFile = null; // {url, name}
+  // Downloads are ordinary HTTP downloads of the file kept on the server
+  // (GET /api/exports/<token>, Content-Disposition: attachment) — not blob:
+  // URLs — so the browser applies its own download settings: download folder,
+  // "ask where to save each file", and the downloads list (Ctrl+J).
+  // A page cannot know whether the user saved, cancelled or opened the file, so
+  // the status never claims the file is saved; the "Tải lại" link downloads the
+  // very same file again (same server copy, valid for 1 hour).
   function clearManualLink() {
-    if (lastFile) URL.revokeObjectURL(lastFile.url);
-    lastFile = null;
     $("exportLink").replaceChildren();
   }
-  function saveBlob(blob, name) {
+  function startDownload(url, name) {
     clearManualLink();
-    lastFile = { url: URL.createObjectURL(blob), name };
-    const a = el("a", { href: lastFile.url, download: name, style: "display:none" });
+    const a = el("a", { href: url, download: name, style: "display:none" });
     document.body.append(a);
     a.click();
     a.remove();
     $("exportLink").replaceChildren(
-      el("a", { class: "btn small", id: "manualDownload", href: lastFile.url, download: name }, `⬇ Tải lại ${name}`),
-      el("span", { class: "muted" }, " Dùng nút này nếu trình duyệt chặn tải tự động hoặc không thấy file trong thư mục Tải xuống."));
+      el("a", { class: "btn small", id: "manualDownload", href: url, download: name }, `⬇ Tải lại ${name}`),
+      el("span", { class: "muted" }, " Dùng nút này nếu trình duyệt chặn tải tự động, nếu đã bấm Huỷ ở hộp thoại lưu, hoặc không thấy file trong danh sách tải xuống (Ctrl+J). File giữ trên máy chủ 1 giờ."));
   }
 
   function setBusy(busy, label) {
@@ -778,18 +769,16 @@
     return `Lỗi máy chủ (HTTP ${res.status})`;
   }
 
-  /** Ask the server for a report file. Returns {blob, name}; throws with a readable message. */
+  /** Ask the server to build a report file. Returns {url, name, size, rows}; throws with a readable message. */
   async function requestReport(fmt, opts) {
     const payload = buildPayload(fmt, opts);
-    const q = opts.inline ? "?inline=true" : "";
-    const res = await fetch(`/api/datasets/${state.current.meta.id}/export/${fmt}${q}`, {
+    const res = await fetch(`/api/datasets/${state.current.meta.id}/export/${fmt}/prepare`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await errorText(res));
-    const blob = await res.blob();
-    if (!blob.size) throw new Error("Máy chủ trả về file rỗng.");
-    const name = filenameFrom(res.headers.get("Content-Disposition")) || `BaoCao.${fmt}`;
-    return { blob, name, rows: res.headers.get("X-Report-Rows") };
+    const r = await res.json();
+    if (!r.size || !r.url || !r.filename) throw new Error("Máy chủ trả về file rỗng.");
+    return { url: r.url, name: r.filename, size: r.size, rows: r.rows };
   }
 
   async function exportReport(fmt, opts = {}) {
@@ -798,12 +787,13 @@
     setBusy(true, fmt);
     setStatus(`Đang tạo file ${FMT_LABEL[fmt]}…`, "busy");
     try {
-      const { blob, name, rows } = await requestReport(fmt, opts);
-      saveBlob(blob, name);
+      const { url, name, size, rows } = await requestReport(fmt, opts);
+      startDownload(url, name);
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
-      const msg = `✅ Đã tạo ${name} (${(blob.size / 1024).toFixed(0)} KB, ${nf.format(+rows || 0)} dòng, ${secs} giây). Trình duyệt đang tải file xuống.`;
+      const msg = `✅ Đã tạo ${name} (${(size / 1024).toFixed(0)} KB, ${nf.format(+rows || 0)} dòng, ${secs} giây). ` +
+        "Đã chuyển cho trình duyệt tải xuống — lưu theo thư mục/hộp thoại lưu của trình duyệt; xem trạng thái bằng Ctrl+J.";
       setStatus(msg, "ok");
-      toast(`Xuất ${FMT_LABEL[fmt]} thành công: ${name}`);
+      toast(`Đã tạo ${name} — trình duyệt đang tải xuống`);
     } catch (e) {
       clearManualLink();
       setStatus(`❌ Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`, "error");
@@ -811,7 +801,7 @@
     } finally { setBusy(false); }
   }
 
-  let preview = null; // {url, blob, name}
+  let preview = null; // {url, name}
   async function openPreview() {
     if (!state.current || state.exporting) return;
     setBusy(true, "preview");
@@ -819,8 +809,8 @@
     try {
       const r = await requestReport("pdf", { inline: true });
       closePreview();
-      preview = { ...r, url: URL.createObjectURL(r.blob) };
-      $("previewFrame").src = preview.url;
+      preview = { url: r.url, name: r.name };
+      $("previewFrame").src = r.url + "?inline=true";
       $("previewName").textContent = r.name;
       $("previewModal").hidden = false;
       setStatus("Bản xem trước chính là file PDF sẽ được tải xuống.", "ok");
@@ -832,7 +822,7 @@
   function closePreview() {
     $("previewModal").hidden = true;
     $("previewFrame").removeAttribute("src");
-    if (preview) { URL.revokeObjectURL(preview.url); preview = null; }
+    preview = null;
   }
 
   /** Re-fetch the dataset and list from the server, keeping sheet, filters, search and sort. */
@@ -868,7 +858,7 @@
     $("reloadBtn").addEventListener("click", reloadData);
     $("previewClose").addEventListener("click", closePreview);
     $("previewDownload").addEventListener("click", () => {
-      if (preview) { saveBlob(preview.blob, preview.name); toast("Đã tải xuống " + preview.name); }
+      if (preview) { startDownload(preview.url, preview.name); toast("Trình duyệt đang tải xuống " + preview.name); }
     });
     $("previewModal").addEventListener("click", (e) => { if (e.target === $("previewModal")) closePreview(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("previewModal").hidden) closePreview(); });

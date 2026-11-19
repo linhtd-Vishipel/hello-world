@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 from datetime import datetime
 
 import openpyxl
@@ -377,3 +378,61 @@ def test_export_xlsx_chart_layout_title_never_overlaps_axis(client):
     wb = openpyxl.load_workbook(io.BytesIO(res.content))
     tk = [n for n in wb.sheetnames if n.startswith("TK")]
     assert len(tk) == 4 and [r[0] for r in wb[tk[0]].iter_rows(min_row=5, values_only=True)][:8] == [g["label"] for g in many]
+
+
+def test_prepare_then_http_download_is_the_same_file(client):
+    """Download fix (Windows 10 + Edge 19/11): the page gets a URL and the browser downloads the
+    report with an ordinary GET (Content-Disposition: attachment), not from a blob: URL."""
+    ds = _upload(client)
+    direct = client.post(f"/api/datasets/{ds}/export/docx", json=_payload())
+    for fmt, media in (("xlsx", "spreadsheetml"), ("pdf", "application/pdf"), ("docx", "wordprocessingml")):
+        prep = client.post(f"/api/datasets/{ds}/export/{fmt}/prepare", json=_payload())
+        assert prep.status_code == 200, prep.text
+        j = prep.json()
+        assert j["url"] == f"/api/exports/{j['token']}" and j["filename"].endswith("." + fmt) and j["rows"] == 2
+        assert j["filename"].startswith("BaoCao_DoanhThuQuyI_")
+        a, b = client.get(j["url"]), client.get(j["url"])  # "Tải lại" = the very same file
+        assert a.status_code == 200 and a.content == b.content and len(a.content) == j["size"] > 0
+        assert media in a.headers["content-type"]
+        assert a.headers["content-disposition"].startswith(f'attachment; filename="{j["filename"]}"')
+        assert a.headers["cache-control"] == "no-store"
+        if fmt == "pdf":
+            assert client.get(j["url"] + "?inline=true").headers["content-disposition"].startswith("inline;")
+        if fmt == "docx":
+            assert len(a.content) == len(direct.content)  # same builder as the direct endpoint
+    wb = openpyxl.load_workbook(io.BytesIO(client.get(client.post(f"/api/datasets/{ds}/export/xlsx/prepare", json=_payload()).json()["url"]).content))
+    assert "Dữ liệu chi tiết" in wb.sheetnames
+
+
+def test_prepare_refusals_and_unknown_token(client):
+    ds = _upload(client)
+    bad = client.post(f"/api/datasets/{ds}/export/pdf/prepare", json=_payload(revenue=1))
+    assert bad.status_code == 422 and "Làm mới dữ liệu" in bad.json()["detail"]  # no file, no token
+    assert client.post("/api/datasets/khongco/export/pdf/prepare", json=_payload()).status_code == 404
+    r = client.get("/api/exports/khong-co-token")
+    assert r.status_code == 404 and "hết hạn" in r.json()["detail"]
+
+
+def test_download_store_expires_and_bounds_memory(monkeypatch):
+    from excel_dashboard import downloads
+
+    downloads._items.clear()
+    t = downloads.put(b"x" * 10, "pdf", "a.pdf", 1)
+    assert downloads.get(t)["filename"] == "a.pdf"
+    monkeypatch.setattr(downloads.time, "time", lambda: 10 ** 12)
+    assert downloads.get(t) is None  # expired
+    monkeypatch.undo()
+    monkeypatch.setattr(downloads, "MAX_BYTES", 25)
+    t1 = downloads.put(b"1" * 10, "pdf", "1.pdf", 1)
+    t2 = downloads.put(b"2" * 10, "pdf", "2.pdf", 1)
+    t3 = downloads.put(b"3" * 10, "pdf", "3.pdf", 1)
+    assert downloads.get(t1) is None and downloads.get(t2) and downloads.get(t3)
+    big = downloads.put(b"9" * 100, "xlsx", "big.xlsx", 1)  # the newest file is always kept
+    assert downloads.get(big) is not None
+    downloads._items.clear()
+
+
+def test_page_uses_http_downloads_not_blob_urls():
+    js = (Path(__file__).resolve().parents[1] / "excel_dashboard" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "createObjectURL" not in js and "/prepare`" in js
+    assert "thành công: ${name}" not in js  # no "saved" claim: the page cannot know what the user chose

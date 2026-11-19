@@ -325,6 +325,18 @@ Gửi kết quả: chuột phải thư mục `C:\nghiemthu\edge` → **Send to �
 | `Playwright không mở được trình duyệt` | Cập nhật Edge (`edge://settings/help`), khởi động lại máy, chạy lại 03 |
 | Phần mềm diệt virus chặn | Cho phép thư mục `C:\nghiemthu` |
 | Muốn làm lại từ đầu | Chạy lại từ bước 04: kết quả cũ tự chuyển vào `lan_chay_truoc\`, không bị xoá |
+| File xuất nằm trong `C:\Users\<tên>\AppData\Local\Temp\MicrosoftEdge...` thay vì thư mục tải xuống | Đó là thư mục Edge dùng khi file được **mở trực tiếp** (nút **Mở tệp / Open file** ở hộp thoại tải xuống, hoặc kiểu file đã đặt "luôn mở"), không phải nơi Web App ghi. Ở hộp thoại tải xuống chọn **Lưu / Lưu thành (Save as)**; vào `edge://settings/downloads`: kiểm tra **Vị trí** (ví dụ `E:\Downloads`), bật **Hỏi nơi lưu mỗi tệp**, tắt **Mở tệp Office trong trình duyệt**, bấm **Xoá** ở mục "Tự động mở một số loại tệp sau khi tải xuống". Từ bản sửa tải xuống ngày 19/11/2026, Web App tải file bằng tải xuống HTTP chuẩn (xem mục 5.1) |
+
+### 5.1 Cơ chế tải file báo cáo (Excel, PDF, Word)
+
+1. Bấm 📊/📄/📝: Web App dựng file trên máy chủ và giữ bản đó **1 giờ** (trong bộ nhớ, không ghi ra đĩa).
+2. Trình duyệt tải file bằng **tải xuống HTTP chuẩn** từ địa chỉ `http://<máy chủ>:8000/api/exports/<mã>`
+   (`Content-Disposition: attachment`, đúng tên `BaoCao_…`). Edge áp dụng đúng cài đặt của người dùng: thư mục tải xuống,
+   **Hỏi nơi lưu mỗi tệp**, và hiện trong danh sách tải xuống **Ctrl+J** (kèm địa chỉ nguồn).
+3. Thông báo trên trang chỉ ghi "Đã tạo … — đã chuyển cho trình duyệt tải xuống": trang web **không thể biết** người dùng
+   đã Lưu, Huỷ hay Mở file, nên không báo "đã lưu thành công". Kiểm tra kết quả bằng Ctrl+J.
+4. Nút **⬇ Tải lại** tải lại **đúng bản file đó** từ máy chủ (giống từng byte), không dựng file mới; sau 1 giờ báo
+   "đã hết hạn — hãy bấm Xuất lại".
 
 Khi cần hỗ trợ: gửi thư mục `C:\nghiemthu\edge\logs` (hoặc cả thư mục `C:\nghiemthu\edge` đã nén).
 

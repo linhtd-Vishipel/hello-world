@@ -131,7 +131,7 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
   p.on("console", (m) => { if (m.type() === "error") problems.push("console: " + m.text()); });
   const responses = [];
   p.on("response", (r) => {
-    if (r.url().includes("/export/")) {
+    if (r.url().includes("/export/") || r.url().includes("/api/exports/")) {
       const h = r.headers();
       responses.push({ url: r.url().replace(/^.*\/api/, "/api"), status: r.status(), type: h["content-type"], disposition: h["content-disposition"], rows: h["x-report-rows"] });
     }
@@ -232,8 +232,13 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
   await section("S03", async () => {
     const manualName = await p.locator("#manualDownload").getAttribute("download");
     const [mdl] = await Promise.all([p.waitForEvent("download"), p.click("#manualDownload")]);
-    await mdl.saveAs(path.join(OUT, "manual__" + mdl.suggestedFilename()));
-    check("T09", "Nút '⬇ Tải lại' tải đúng file vừa tạo", mdl.suggestedFilename() === manualName && FILENAME_RE.test(manualName), manualName);
+    const again = path.join(OUT, "manual__" + mdl.suggestedFilename());
+    await mdl.saveAs(again);
+    // Same server copy as the automatic download: byte-identical, not a regenerated or empty file.
+    const first = fs.readdirSync(OUT).filter((f) => f.endsWith("__" + manualName) && !f.startsWith("manual__")).map((f) => path.join(OUT, f));
+    const same = first.length === 1 && fs.readFileSync(first[0]).equals(fs.readFileSync(again));
+    check("T09", "Nút '⬇ Tải lại' tải lại đúng file vừa tạo (giống từng byte)", mdl.suggestedFilename() === manualName && FILENAME_RE.test(manualName) && same,
+      `${manualName}${same ? "" : " — KHÁC file tải lần đầu"}`);
   });
 
   await section("S04", async () => {
@@ -244,7 +249,7 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
     const [pdl] = await Promise.all([p.waitForEvent("download"), p.click("#previewDownload")]);
     await pdl.saveAs(path.join(OUT, "preview__" + pdl.suggestedFilename()));
     await p.keyboard.press("Escape");
-    check("T10", "Xem trước PDF + tải từ bản xem trước", src.startsWith("blob:") && FILENAME_RE.test(pdl.suggestedFilename()) && await p.locator("#previewModal").isHidden(), pdl.suggestedFilename());
+    check("T10", "Xem trước PDF + tải từ bản xem trước", /^\/api\/exports\/[\w-]+\?inline=true$/.test(src) && FILENAME_RE.test(pdl.suggestedFilename()) && await p.locator("#previewModal").isHidden(), pdl.suggestedFilename());
   });
 
   await section("S05", async () => {
@@ -358,8 +363,12 @@ const FILENAME_RE = /^BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)$/;
   });
 
   await section("S16", async () => {
-    const bad = responses.filter((r) => r.status === 200 && !/^attachment; filename="BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)"; filename\*=UTF-8''/.test(r.disposition || "") && !r.url.includes("inline=true"));
-    check("T41", "Header Content-Type/Content-Disposition đúng ở mọi lần xuất", bad.length === 0 && responses.every((r) => r.status !== 500), `${responses.length} phản hồi, ${bad.length} sai`);
+    // File responses (GET /api/exports/<token>) must be real attachments; /prepare returns JSON.
+    const files = responses.filter((r) => r.url.includes("/api/exports/"));
+    const bad = files.filter((r) => r.status === 200 && !/^attachment; filename="BaoCao_[A-Za-z0-9]+_\d{8}_\d{4}\.(xlsx|pdf|docx)"; filename\*=UTF-8''/.test(r.disposition || "") && !r.url.includes("inline=true"));
+    const blobDl = await p.evaluate(() => [...document.querySelectorAll("a[href^='blob:']")].length);
+    check("T41", "Tải xuống HTTP chuẩn (không dùng blob:), header Content-Type/Content-Disposition đúng ở mọi lần xuất",
+      files.length > 0 && bad.length === 0 && blobDl === 0 && responses.every((r) => r.status !== 500), `${files.length} file tải qua HTTP, ${bad.length} sai, ${blobDl} liên kết blob:`);
     // The browser itself logs every non-2xx response; exactly the two intended
     // over-limit refusals (T28 PDF, T29 Word -> HTTP 422) are expected here.
     const expected422 = problems.filter((m) => /status of 422/.test(m));
