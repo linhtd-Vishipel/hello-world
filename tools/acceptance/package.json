@@ -1,0 +1,12 @@
+{
+  "name": "excel-dashboard-acceptance",
+  "private": true,
+  "description": "End-to-end export acceptance test (Chrome, Chromium, Microsoft Edge)",
+  "scripts": {
+    "edge": "node accept.js --browser msedge",
+    "chrome": "node accept.js --browser chrome"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

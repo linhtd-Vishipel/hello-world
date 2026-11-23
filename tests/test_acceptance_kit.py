@@ -1,0 +1,727 @@
+"""Tests for the Windows/Edge acceptance kit (tools/acceptance/nghiemthu.py + windows/*.bat).
+
+The .bat files cannot run on Linux CI, so they are checked statically: CRLF,
+ASCII only, labels that exist, the right orchestrator command, no characters
+that cmd.exe would interpret inside echo text, and a pause so the window
+stays open. All logic lives in nghiemthu.py, which is tested directly.
+"""
+import importlib
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+KIT = ROOT / "tools" / "acceptance"
+WIN = KIT / "windows"
+DOC = ROOT / "docs" / "EXCEL_DASHBOARD_NGHIEM_THU.md"
+BATS = {
+    "01_KIEM_TRA_MOI_TRUONG.bat": "kiem-tra",
+    "02_TAO_DU_LIEU_MAU.bat": "tao-du-lieu",
+    "03_CAI_DAT_THU_VIEN.bat": "cai-dat",
+    "04_KIEM_THU_EDGE.bat": "kiem-thu-edge",
+    "05_DOI_CHIEU_KET_QUA.bat": "doi-chieu",
+    "06_TONG_HOP_BAO_CAO.bat": "tong-hop",
+}
+
+
+@pytest.fixture
+def kit(tmp_path, monkeypatch):
+    monkeypatch.setenv("NGHIEMTHU_DIR", str(tmp_path / "edge"))
+    monkeypatch.setenv("NGHIEMTHU_CONG_CU", str(tmp_path / "cong_cu"))
+    monkeypatch.delenv("NGHIEMTHU_BROWSER", raising=False)
+    monkeypatch.delenv("NGHIEMTHU_EXE", raising=False)
+    sys.path.insert(0, str(KIT))
+    try:
+        mod = importlib.reload(importlib.import_module("nghiemthu"))
+        yield mod
+    finally:
+        sys.path.remove(str(KIT))
+
+
+# ---------------------------------------------------------------------------
+# .bat files
+# ---------------------------------------------------------------------------
+
+
+def test_bat_files_exist_with_required_names():
+    names = sorted(p.name for p in WIN.glob("*.bat"))
+    assert names == sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat", "M02_DOI_CHIEU_EXCEL.bat"])
+
+
+@pytest.mark.parametrize("name", sorted(list(BATS) + ["_chung.bat", "MO_THU_MUC_KET_QUA.bat", "M02_DOI_CHIEU_EXCEL.bat",
+                                                        "../../../BAT_DAU_NGHIEM_THU_EDGE.bat"]))
+def test_bat_file_is_safe_for_cmd(name):
+    raw = (WIN / name).read_bytes()
+    assert raw.isascii(), "BAT must be ASCII (no code page problems in cmd.exe)"
+    assert b"\r\n" in raw and raw.count(b"\n") == raw.count(b"\r\n"), "BAT must use CRLF line endings"
+    text = raw.decode("ascii")
+    labels = set(re.findall(r"(?mi)^:(\w+)\s*$", text))
+    for target in re.findall(r"(?i)\bgoto\s+:?(\w+)", text):
+        assert target.lower() == "eof" or target in labels, f"goto {target} has no label"
+    for line in text.splitlines():
+        if re.match(r"\s*echo\b", line, re.I) and not line.strip().lower() in ("echo.", "@echo off"):
+            body = line.split(None, 1)[1] if " " in line.strip() else ""
+            assert not re.search(r"[()&|<>^]", body), f"cmd-special character in echo: {line!r}"
+
+
+@pytest.mark.parametrize("name,command", BATS.items())
+def test_step_bat_calls_orchestrator(name, command):
+    text = (WIN / name).read_text(encoding="ascii")
+    assert 'call "%~dp0_chung.bat"' in text
+    assert f'%PY% "%TOOL%" {command}' in text
+    assert re.search(r"(?mi)^pause\s*$", text), "window must stay open"
+    assert text.index("call ") < text.index("%PY%")
+    # the real exit code of _chung.bat and of the Python step is kept and returned
+    assert text.count('set "MA=%ERRORLEVEL%"') == 2
+    assert text.index("%PY%") < text.rindex('set "MA=%ERRORLEVEL%"')
+    assert text.rstrip().endswith("endlocal & exit /b %MA%")
+
+
+def test_common_bat_finds_python_and_tool():
+    text = (WIN / "_chung.bat").read_text(encoding="ascii")
+    assert r'set "TOOL=%~dp0..\nghiemthu.py"' in text
+    assert (WIN / ".." / "nghiemthu.py").resolve().is_file()
+    assert r'set "NGHIEMTHU_DIR=C:\nghiemthu\edge"' in text
+    assert "if not defined NGHIEMTHU_DIR" in text  # a user-set folder is respected
+    assert 'set "PYTHONDONTWRITEBYTECODE=1"' in text
+
+
+PY_CANDIDATES = ["py -3.13", "py -3.12", "py -3.11", "py -3", "python", "python3"]
+
+
+def _chung_lines():
+    return (WIN / "_chung.bat").read_text(encoding="ascii").splitlines()
+
+
+def test_common_bat_tries_python_candidates_in_order():
+    calls = [l.split(None, 2)[2] for l in _chung_lines() if l.startswith("call :thu_python ")]
+    assert calls == PY_CANDIDATES  # tested 3.13 > 3.12 > 3.11, then any Python 3, python.exe, python3.exe
+
+
+def test_common_bat_sets_py_only_after_version_check():
+    lines = _chung_lines()
+    sub = lines[lines.index(":thu_python"):]
+    run = sub.index('%* -c "import sys" >nul 2>&1')            # 1. the command runs at all (rejects Store stub)
+    check = sub.index('%* -c "%PY_KIEM_TRA%" >nul 2>&1')       # 2. version >= 3.11
+    assert sub[run + 1] == "if errorlevel 1 exit /b 0"
+    assert sub[check + 1] == "if errorlevel 1 goto :bo_qua_ban_cu"  # older: remember in PY_CU, keep searching
+    assert sub.index('set "PY=%*"') > check
+    # PY is assigned nowhere else, so no candidate can bypass the version check
+    assert [l for l in lines if l.startswith('set "PY=')] == ['set "PY="', 'set "PY=%*"']
+    assert sub[0:2] == [":thu_python", "if defined PY exit /b 0"]  # first suitable candidate wins
+
+
+def test_common_bat_reports_old_or_missing_python_with_error_code():
+    text = "\n".join(_chung_lines())
+    tail = text[text.index("if defined PY goto :co_python"):text.index("\n:thieu_tool")]
+    assert "Chi tim thay Python cu hon 3.11: %PY_CU%" in tail
+    assert "Khong tim thay Python tren may." in tail
+    assert tail.rstrip().endswith("exit /b 9009")
+
+
+@pytest.mark.parametrize("version,accepted", [
+    ((2, 7, 18), False), ((3, 9, 13), False), ((3, 10, 11), False),
+    ((3, 11, 0), True), ((3, 12, 7), True), ((3, 13, 1), True), ((3, 14, 0), True),
+])
+def test_common_bat_version_check_expression(version, accepted):
+    """Run the exact one-liner from _chung.bat with a simulated sys.version_info."""
+    import subprocess
+
+    line = next(l for l in _chung_lines() if l.startswith('set "PY_KIEM_TRA='))
+    code = line[len('set "PY_KIEM_TRA='):-1]
+    assert '"' not in code and "%" not in code and "!" not in code  # safe inside "%PY_KIEM_TRA%" in cmd
+    prog = f"import sys; sys.version_info = {version!r}\n{code}"
+    r = subprocess.run([sys.executable, "-c", prog], timeout=30)
+    assert (r.returncode == 0) is accepted
+
+
+@pytest.mark.parametrize("name", sorted(p.name for p in WIN.glob("*.bat")) + ["../../../BAT_DAU_NGHIEM_THU_EDGE.bat"])
+def test_bat_labels_and_comments(name):
+    lines = (WIN / name).read_text(encoding="ascii").splitlines()
+    labels = [l[1:].strip() for l in lines if re.match(r"^:\w+\s*$", l)]
+    assert len(labels) == len(set(labels)), "duplicate label"
+    for a in labels:
+        for b in labels:
+            assert a == b or not b.lower().startswith(a.lower()), f"label {a} is a prefix of {b}"
+    for target in re.findall(r"(?i)^\s*call\s+:(\w+)", "\n".join(lines), re.M):
+        assert target in labels, f"call :{target} has no label"
+    for l in lines:
+        if l.lower().startswith("rem"):
+            assert not re.search(r"[<>|&^]", l), f"cmd-special character in comment: {l!r}"
+
+
+def test_gitattributes_keeps_bat_crlf():
+    assert "*.bat -text" in (ROOT / ".gitattributes").read_text()
+
+
+def test_orchestrator_commands_match_bats(kit):
+    assert set(kit.COMMANDS) == set(BATS.values()) | {"doi-chieu-excel"}
+    assert "doi-chieu-excel" in (WIN / "M02_DOI_CHIEU_EXCEL.bat").read_text(encoding="ascii")
+    assert str(kit.EDGE_DIR).endswith("edge")
+
+
+# ---------------------------------------------------------------------------
+# M01–M12 come verbatim from the acceptance document
+# ---------------------------------------------------------------------------
+
+
+def test_manual_items_are_verbatim_from_doc(kit):
+    items = kit.manual_items()
+    assert [i["ma"] for i in items] == [f"M{n:02d}" for n in range(1, 13)]
+    doc = DOC.read_text(encoding="utf-8")
+    for it in items:
+        assert f"| {it['ma']} | {it['thao_tac']} | {it['mong_doi']} | |" in doc
+
+
+# ---------------------------------------------------------------------------
+# Verdict
+# ---------------------------------------------------------------------------
+
+
+def _write(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _complete_run(kit, *, channel="msedge", manual="P", ui_fail=None, ui_count=42, verify_first=False, m02=True):
+    d = kit.DIRS
+    if m02:
+        _write(kit.M02_FILE, {"luc": "2026-11-18T10:00:00", "file_nguon": "Phu luc 2.xlsx", "file_xuat": [{"file": "BaoCao_x.xlsx"}],
+                              "sheet_nguon": [{"ten": "PL2.1", "so_dong": 26}], "pass": 30, "fail": 0, "skip": 1})
+    _write(kit.EDGE_DIR / "moi_truong.json", {"muc": [], "dat": True})
+    ui = [{"id": f"T{i:02d}", "name": f"bài {i}", "pass": f"T{i:02d}" != ui_fail, "detail": "<script>x</script>"}
+          for i in range(1, ui_count + 1)]
+    browser = {"name": "msedge", "version": "142", "userAgent": "Edg/142", "launch": {"channel": channel, "executablePath": None}}
+    if verify_first:
+        _write(d["tu_dong"] / "verify_results.json", {"total": 1, "passed": 1, "failed": 0, "checks": [{"group": "G", "name": "n", "pass": True, "detail": ""}]})
+        time.sleep(0.05)
+    _write(d["tu_dong"] / "ui_results.json", ui)
+    _write(d["tu_dong"] / "ui_summary.json", {"browser": browser, "sections": [{"id": "S01", "name": "x", "tests": ["T01"], "seconds": 3}]})
+    if not verify_first:
+        time.sleep(0.05)
+        _write(d["tu_dong"] / "verify_results.json", {"total": 1, "passed": 1, "failed": 0, "checks": [{"group": "G", "name": "n", "pass": True, "detail": ""}]})
+    _write(d["lon"] / "large_results.json", [["Upload", True, "ok"]])
+    res = {f"M{n:02d}": {"ket_qua": manual if isinstance(manual, str) else manual.get(f"M{n:02d}", "P"), "ghi_chu": ""} for n in range(1, 13)}
+    _write(kit.MANUAL_FILE, {"nguoi_kiem_thu": "Trần Thị Mai", "ket_qua": res})
+
+
+def test_verdict_nothing_run(kit):
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["phan_loai"].startswith("CHƯA ĐỦ ĐIỀU KIỆN")
+    assert (r["tong"], r["pass"], r["fail"], r["chua"]) == (42 + 1 + 1 + 12, 0, 0, 56)
+    assert [x["ma"] for x in r["nhom"][0]["rows"]] == [f"T{i:02d}" for i in range(1, 43)]
+    assert all(x["kq"] == "CHƯA KIỂM THỬ" for g in r["nhom"] for x in g["rows"])
+    assert [(s["ma"], s["trang_thai"]) for s in r["cac_buoc"]] == [(f"0{i}", "CHƯA CHẠY") for i in range(1, 7)]
+
+
+def test_verdict_all_pass_on_edge(kit):
+    _complete_run(kit, manual={"M09": "C"})
+    r = kit.build_report()
+    assert r["ket_luan"] == "ĐẠT", r["ly_do_chua_du"] + r["ly_do_fail"]
+    assert (r["tong"], r["pass"], r["fail"], r["chua"]) == (42 + 1 + 1 + 12, 56, 0, 0)
+
+
+def test_verdict_manual_fail(kit):
+    _complete_run(kit, manual={"M07": "F"})
+    assert kit.build_report()["ket_luan"] == "KHÔNG ĐẠT"
+
+
+def test_verdict_ui_fail_links_screenshot(kit):
+    _complete_run(kit, ui_fail="T05")
+    (kit.DIRS["tu_dong"] / "loi_T05.png").write_bytes(b"png")
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT"
+    row = next(x for g in r["nhom"] for x in g["rows"] if x["ma"] == "T05")
+    assert row["anh"] == ["ket_qua_tu_dong/loi_T05.png"]
+
+
+def test_verdict_not_edge_is_not_valid(kit):
+    _complete_run(kit, channel=None)
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT"
+    assert any("KHÔNG phải Microsoft Edge" in x for x in r["ly_do_chua_du"])
+
+
+def test_verdict_missing_ui_tests_or_stale_verify(kit):
+    _complete_run(kit, ui_count=38)
+    assert kit.build_report()["ket_luan"] == "KHÔNG ĐẠT"
+    _complete_run(kit, verify_first=True)
+    assert any("cũ hơn" in x for x in kit.build_report()["ly_do_chua_du"])
+
+
+def test_verdict_manual_not_checked(kit):
+    _complete_run(kit, manual={"M03": "B"})
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["chua"] == 1
+    assert next(x for x in r["nhom"][3]["rows"] if x["ma"] == "M03")["kq"] == "CHƯA KIỂM THỬ"
+
+
+def test_verdict_environment_error(kit):
+    _complete_run(kit)
+    _write(kit.EDGE_DIR / "moi_truong.json", {"dat": False, "muc": [
+        {"ten": "Node.js ≥ 20", "trang_thai": "FAIL", "chi_tiet": "không tìm thấy node", "huong_dan": ""}]})
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["loi_moi_truong"][0]["ten"] == "Node.js ≥ 20"
+    assert any("Node.js" in x for x in r["ly_do_fail"])
+
+
+def test_optional_tools_missing_are_skip_not_fail(kit, monkeypatch):
+    """Poppler/LibreOffice are optional: shown as SKIP in step 01, never as FAIL or PASS."""
+    monkeypatch.setattr(kit, "find_poppler", lambda: None)
+    monkeypatch.setattr(kit, "find_soffice", lambda: None)
+    items = {i["ten"]: i for i in kit.env_items()}
+    pop = next(i for n, i in items.items() if n.startswith("Poppler"))
+    lo = next(i for n, i in items.items() if n.startswith("LibreOffice"))
+    assert pop["trang_thai"] == "SKIP" and lo["trang_thai"] == "SKIP"
+    assert "KHÔNG bắt buộc" in pop["huong_dan"] and "KHÔNG bắt buộc" in lo["huong_dan"]
+    assert "github.com" not in pop["huong_dan"] and "download" not in lo["huong_dan"]  # no install instructions
+    assert items["Bộ đọc PDF tích hợp (pdfcheck.py, thư viện chuẩn Python)"]["trang_thai"] == "PASS"
+    assert not [i for i in items.values() if i["trang_thai"] == "FAIL" and ("Poppler" in i["ten"] or "LibreOffice" in i["ten"])]
+
+
+def test_step_01_passes_without_optional_tools(kit, monkeypatch):
+    monkeypatch.setattr(kit, "find_poppler", lambda: None)
+    monkeypatch.setattr(kit, "find_soffice", lambda: None)
+    real = kit.env_items
+    monkeypatch.setattr(kit, "env_items", lambda: [i for i in real() if i["trang_thai"] != "FAIL"])  # other machine-specific items
+    log = kit.Log("01")
+    assert kit.cmd_kiem_tra(log) == 0
+    log.close()
+    text = log.path.read_text(encoding="utf-8")
+    assert "[SKIP] Poppler" in text and "[SKIP] LibreOffice" in text and "KẾT LUẬN: ĐẠT" in text
+
+
+def test_verify_skip_rows_never_count_as_pass(kit):
+    _complete_run(kit)
+    _write(kit.DIRS["tu_dong"] / "verify_results.json", {"total": 3, "passed": 2, "failed": 0, "skipped": 1, "checks": [
+        {"group": "G", "name": "a", "status": "PASS", "pass": True, "detail": ""},
+        {"group": "G", "name": "b", "status": "PASS", "pass": True, "detail": ""},
+        {"group": "Word — LibreOffice (tùy chọn)", "name": "c", "status": "SKIP", "pass": False, "detail": "không có"}]})
+    r = kit.build_report()
+    b = r["nhom"][1]
+    assert (b["tong"], b["pass"], b["fail"], b["chua"], b["skip"]) == (3, 2, 0, 0, 1)
+    assert r["skip"] == 1 and r["pass"] == 42 + 2 + 1 + 12
+    assert r["ket_luan"] == "ĐẠT", r["ly_do_fail"] + r["ly_do_chua_du"]  # SKIP alone does not block …
+    md = kit.render_md(r)
+    assert "SKIP: **1**" in md and "không được tính là PASS" in md and "Mọi bài kiểm thử đều PASS" not in md
+    assert "1 mục phụ SKIP" in kit.render_html(r)
+
+
+def test_verify_fail_still_blocks_with_skips(kit):
+    _complete_run(kit)
+    _write(kit.DIRS["tu_dong"] / "verify_results.json", {"total": 2, "checks": [
+        {"group": "G", "name": "a", "status": "FAIL", "pass": False, "detail": "lệch"},
+        {"group": "G", "name": "b", "status": "SKIP", "pass": False, "detail": ""}]})
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and r["fail"] == 1 and r["skip"] == 1
+
+
+def test_report_files_escape_content(kit):
+    _complete_run(kit)
+    assert kit.cmd_tong_hop(kit.Log("06"), ask=False, open_report=False) == 0
+    page = (kit.EDGE_DIR / "BAO_CAO_NGHIEM_THU.html").read_text(encoding="utf-8")
+    assert "<script>x</script>" not in page and "&lt;script&gt;" in page
+    assert "KẾT LUẬN: ĐẠT" in page and "Tổng số bài kiểm thử:</b> 56" in page
+    for section in ("6 bước thực hiện", "Lỗi môi trường (bước 01)", "Chi tiết lỗi", "Vị trí lưu log và ảnh", "M12"):
+        assert section in page
+    assert str(kit.DIRS["logs"]) in page and str(kit.DIRS["anh"]) in page
+    assert "KẾT LUẬN: ĐẠT" in (kit.EDGE_DIR / "BAO_CAO_NGHIEM_THU.md").read_text(encoding="utf-8")
+    assert json.loads((kit.EDGE_DIR / "ket_qua_tong_hop.json").read_text(encoding="utf-8"))["ket_luan"] == "ĐẠT"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def test_log_run_timeout_and_exit_code(kit):
+    log = kit.Log("04")
+    assert log.run([sys.executable, "-c", "import time; time.sleep(5)"], timeout=1) == 124
+    assert log.run([sys.executable, "-c", "print('Tiếng Việt'); raise SystemExit(3)"]) == 3
+    assert log.run(["khong-co-lenh-nay-xyz"]) == 127
+    log.close()
+    assert "Tiếng Việt" in log.path.read_text(encoding="utf-8")
+
+
+def test_pdfcheck_reads_vietnamese_pdf_without_poppler(tmp_path):
+    """pdfcheck.py (stdlib only) extracts text, pages, fonts and images from a reportlab PDF."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+
+    sys.path.insert(0, str(KIT))
+    try:
+        import pdfcheck
+    finally:
+        sys.path.remove(str(KIT))
+    font_dir = ROOT / "excel_dashboard" / "fonts"
+    pdfmetrics.registerFont(TTFont("DejaVuTest", str(font_dir / "DejaVuSans.ttf")))
+    path = tmp_path / "thử nghiệm.pdf"
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.setFont("DejaVuTest", 12)
+    c.drawString(72, 760, "BÁO CÁO DOANH THU — Đài Cà Mau")
+    c.drawString(72, 740, "Tổng cộng 24.550.000")
+    c.showPage()
+    c.setFont("DejaVuTest", 10)
+    c.drawString(72, 760, "Trang 2/2")
+    c.save()
+    pdf = pdfcheck.open_pdf(path)
+    assert pdf.header_ok and pdf.eof_ok and len(pdf.pages) == 2
+    assert all(round(p.width) == 595 and round(p.height) == 842 for p in pdf.pages)
+    used = [f for f in pdf.all_fonts() if "DejaVu" in f.name]  # reportlab also lists its unused default Helvetica
+    assert used and all(f.embedded for f in used)
+    lines = pdfcheck.text(pdf).split("\f")
+    assert lines[0].splitlines() == ["BÁO CÁO DOANH THU — Đài Cà Mau", "Tổng cộng 24.550.000"]
+    assert lines[1].strip() == "Trang 2/2"
+    (tmp_path / "hong.pdf").write_bytes(b"not a pdf")
+    with pytest.raises(Exception):
+        pdfcheck.text(tmp_path / "hong.pdf")
+
+
+def test_verify_needs_no_poppler_or_libreoffice():
+    """Poppler/LibreOffice are called only from the optional cross-checks, which SKIP when absent."""
+    src = (KIT / "verify.py").read_text(encoding="utf-8")
+    body = {m.group(1): m.group(2) for m in re.finditer(r"(?ms)^def (\w+)\(.*?\n(.*?)(?=^def |^if __name__)", src)}
+    callers = sorted(n for n, b in body.items() if re.search(r'run\("pdf|office_to_pdf\(', b))
+    assert callers == ["check_layouts", "poppler_crosscheck"], callers
+    assert 'if not shutil.which("pdftotext")' in body["poppler_crosscheck"] and "skip(" in body["poppler_crosscheck"]
+    assert "if not soffice:" in body["check_layouts"] and "skip(" in body["check_layouts"]
+    reqs = (KIT / "requirements-nghiemthu.txt").read_text(encoding="utf-8").lower()
+    assert "pypdf" not in reqs and "pymupdf" not in reqs and "fitz" not in reqs
+
+
+def test_find_poppler_via_env(kit, tmp_path, monkeypatch):
+    bindir = tmp_path / "poppler" / "Library" / "bin"
+    bindir.mkdir(parents=True)
+    ext = ".exe" if os.name == "nt" else ""
+    for t in kit.POPPLER_TOOLS[:-1]:
+        (bindir / f"{t}{ext}").write_text("x")
+    monkeypatch.setenv("POPPLER_BIN", str(bindir))
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert kit.find_poppler() is None  # pdfimages missing -> not accepted
+    (bindir / f"pdfimages{ext}").write_text("x")
+    assert kit.find_poppler() == str(bindir)
+
+
+def test_venv_modules_all_present_regression(kit, monkeypatch):
+    """An empty 'missing' line means everything imported (bug found in the dry run)."""
+    kit.VPY.parent.mkdir(parents=True)
+    kit.VPY.write_text("")
+    monkeypatch.setattr(kit, "capture", lambda cmd, timeout=60: (0, ""))
+    assert kit.venv_modules()[0] is True
+    monkeypatch.setattr(kit, "capture", lambda cmd, timeout=60: (0, "psutil,httpx"))
+    assert kit.venv_modules() == (False, "thiếu: psutil, httpx")
+
+
+def test_log_run_error_does_not_hang(kit, monkeypatch):
+    """Regression: an exception while streaming output (e.g. BrokenPipe, Ctrl+C) left the
+    timeout timer as a non-daemon thread, so the window hung for up to an hour on exit."""
+    import threading
+
+    log = kit.Log("05")
+
+    def boom(self, msg=""):
+        if "tick" in msg:
+            raise BrokenPipeError("console closed")
+
+    monkeypatch.setattr(kit.Log, "line", boom)
+    t0 = time.time()
+    with pytest.raises(BrokenPipeError):
+        log.run([sys.executable, "-c", "import time\nprint('tick', flush=True)\ntime.sleep(30)"], timeout=3600)
+    assert time.time() - t0 < 10, "child must be killed, not awaited"
+    assert not [t for t in threading.enumerate() if t is not threading.main_thread() and not t.daemon]
+
+
+def test_port_free_detects_listener_but_not_time_wait(kit):
+    import socket
+
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    srv.listen()
+    assert kit.port_free(port) is False  # a real listener is busy
+    cli = socket.create_connection(("127.0.0.1", port))
+    conn, _ = srv.accept()
+    conn.close()  # server side closes first -> its end lingers in TIME_WAIT
+    cli.close()
+    srv.close()
+    assert kit.port_free(port) is True  # TIME_WAIT only: free for the next step
+
+
+def test_open_results_helpers_point_to_real_places():
+    opener = (WIN / "MO_THU_MUC_KET_QUA.bat").read_text(encoding="ascii")
+    assert r'set "NGHIEMTHU_DIR=C:\nghiemthu\edge"' in opener
+    assert r'"%NGHIEMTHU_DIR%\BAO_CAO_NGHIEM_THU.html"' in opener
+    launcher = (ROOT / "BAT_DAU_NGHIEM_THU_EDGE.bat").read_text(encoding="ascii")
+    target = re.search(r'explorer "%~dp0([^"]+)"', launcher).group(1)
+    assert (ROOT / target.replace("\\", "/")).is_dir()
+    assert (ROOT / target.replace("\\", "/") / "01_KIEM_TRA_MOI_TRUONG.bat").is_file()
+
+
+def test_report_files_are_backed_up_not_overwritten(kit):
+    _complete_run(kit)
+    kit.cmd_tong_hop(kit.Log("06"), ask=False, open_report=False)
+    first = (kit.EDGE_DIR / "BAO_CAO_NGHIEM_THU.html").read_bytes()
+    time.sleep(1.1)  # backups are grouped per second
+    kit.cmd_tong_hop(kit.Log("06"), ask=False, open_report=False)
+    backups = list(kit.DIRS["luu"].glob("*/bao_cao/BAO_CAO_NGHIEM_THU.html"))
+    assert len(backups) == 1 and backups[0].read_bytes() == first
+
+
+def test_step_04_refuses_without_successful_install(kit, monkeypatch):
+    monkeypatch.setattr(kit, "venv_modules", lambda: (True, "đủ"))
+    monkeypatch.setattr(kit, "playwright_version", lambda: "1.63.0")
+    monkeypatch.setattr(kit, "find_test_browser", lambda: ("msedge.exe", "142"))
+    for f in kit.SAMPLE_FILES:
+        (kit.DIRS["mau"] / f).parent.mkdir(parents=True, exist_ok=True)
+        (kit.DIRS["mau"] / f).write_bytes(b"x")
+    log = kit.Log("04")
+    assert kit.preconditions(log) is False  # no marker: step 03 (npm ci, browser launch) never succeeded
+    kit.save_json(kit.INSTALL_MARKER, {"luc": "now"})
+    assert kit.preconditions(log) is True
+    log.close()
+    assert "Bước 03 chưa hoàn tất thành công" in log.path.read_text(encoding="utf-8")
+
+
+def test_kit_never_writes_to_git_or_web_app_sources():
+    for f in list(KIT.glob("*.py")) + list(KIT.glob("*.js")) + list(WIN.glob("*.bat")) + [ROOT / "BAT_DAU_NGHIEM_THU_EDGE.bat"]:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        assert not re.search(r"\bgit\b[^\n]*\b(commit|push|checkout|reset|merge|rebase|add|clean|stash)\b", text), f
+    src = (KIT / "nghiemthu.py").read_text(encoding="utf-8")
+    assert '"rev-parse", "--short", "HEAD"' in src  # read-only git use
+    assert "EXCEL_DASHBOARD_DATA_DIR" in src and "PYTHONDONTWRITEBYTECODE" in src
+
+
+def test_environment_variable_names_are_consistent():
+    src = (KIT / "nghiemthu.py").read_text(encoding="utf-8")
+    used = set(re.findall(r'os\.environ\.get\("((?:NGHIEMTHU|POPPLER)_[A-Z_]+)"', src))
+    assert used == {"NGHIEMTHU_DIR", "NGHIEMTHU_CONG_CU", "NGHIEMTHU_PORT", "NGHIEMTHU_BROWSER", "NGHIEMTHU_EXE",
+                    "POPPLER_BIN", "NGHIEMTHU_SOFFICE"}
+    assert 'os.environ.get("NGHIEMTHU_SOFFICE")' in (KIT / "verify.py").read_text(encoding="utf-8")
+    guide = (ROOT / "docs" / "HUONG_DAN_NGHIEM_THU_EDGE_WINDOWS.md").read_text(encoding="utf-8")
+    for name in ("POPPLER_BIN", "NGHIEMTHU_SOFFICE", "NGHIEMTHU_DIR", "NGHIEMTHU_PORT"):
+        assert name in guide, name
+    bat_vars = set(re.findall(r"%([A-Z_]+)%", "".join(p.read_text(encoding="ascii") for p in WIN.glob("*.bat"))))
+    # PY_CU / PY_KIEM_TRA are internal to _chung.bat (Python version search)
+    assert bat_vars <= {"NGHIEMTHU_DIR", "PY", "TOOL", "ERRORLEVEL", "MA", "PY_CU", "PY_KIEM_TRA"}, bat_vars
+
+
+def test_runs_from_any_working_directory_and_paths_with_spaces(tmp_path):
+    import subprocess
+
+    out = tmp_path / "thu muc co dau cach" / "edge"
+    env = {**os.environ, "NGHIEMTHU_DIR": str(out), "NGHIEMTHU_CONG_CU": str(tmp_path / "cong cu"), "PYTHONUTF8": "1"}
+    r = subprocess.run([sys.executable, str(KIT / "nghiemthu.py"), "kiem-tra"], cwd="/", env=env,
+                       capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert "Thư mục kết quả không có dấu tiếng Việt: " in r.stdout and str(ROOT) in r.stdout
+    assert (out / "logs" / "01_kiem_tra_moi_truong.log").is_file()
+    for sub in ("mau", "ket_qua_tu_dong", "ket_qua_du_lieu_lon", "thu_cong/anh", "logs"):
+        assert (out / sub).is_dir(), sub
+
+
+def test_vietnamese_results_folder_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("NGHIEMTHU_DIR", str(tmp_path / "kết quả" / "edge"))
+    sys.path.insert(0, str(KIT))
+    try:
+        mod = importlib.reload(importlib.import_module("nghiemthu"))
+        item = next(i for i in mod.env_items() if i["ten"].startswith("Thư mục kết quả"))
+        assert item["trang_thai"] == "CẢNH BÁO" and "không dấu" in item["huong_dan"]
+    finally:
+        sys.path.remove(str(KIT))
+
+
+def test_source_fingerprint_identifies_tested_code(kit, tmp_path):
+    """The report's fingerprint must match between a ZIP download, a Windows git clone
+    (CRLF line endings) and the repository, ignore installed/caches, and change on any edit."""
+    import shutil
+    import subprocess
+
+    base = kit.source_fingerprint()
+    copy = tmp_path / "zip"
+    copy.mkdir()
+    archive = subprocess.run(["git", "-C", str(ROOT), "archive", "HEAD"], capture_output=True, check=True).stdout
+    subprocess.run(["tar", "-x", "-C", str(copy)], input=archive, check=True)
+    for src in ("tools/acceptance", "excel_dashboard", "docs/EXCEL_DASHBOARD_NGHIEM_THU.md", "requirements.txt"):
+        # working tree may be ahead of HEAD while developing: compare against the working tree content
+        a, b = ROOT / src, copy / src
+        if a.is_dir():
+            shutil.rmtree(b)
+            shutil.copytree(a, b, ignore=shutil.ignore_patterns("node_modules", "__pycache__"))
+        else:
+            shutil.copy2(a, b)
+    assert kit.source_fingerprint(copy) == base
+    for f in copy.rglob("*"):  # Windows clone with core.autocrlf=true
+        if f.is_file() and f.suffix in {".py", ".js", ".md", ".txt", ".json", ".html", ".css"}:
+            f.write_bytes(f.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    (copy / "tools/acceptance/node_modules/x").mkdir(parents=True)
+    (copy / "tools/acceptance/node_modules/x/a.js").write_text("installed")
+    (copy / "excel_dashboard/__pycache__").mkdir(exist_ok=True)
+    (copy / "excel_dashboard/__pycache__/m.pyc").write_bytes(b"cache")
+    assert kit.source_fingerprint(copy) == base
+    (copy / "excel_dashboard/export.py").write_text("# sua\n", encoding="utf-8")
+    assert kit.source_fingerprint(copy)[0] != base[0]
+
+
+# ---------------------------------------------------------------------------
+# M02: dynamic Excel comparison
+# ---------------------------------------------------------------------------
+
+
+def test_m02_pass_requires_automatic_comparison(kit):
+    _complete_run(kit, m02=False)
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and any("M02" in x and "chưa chạy" in x for x in r["ly_do_fail"])
+    _write(kit.M02_FILE, {"file_nguon": "a.xlsx", "file_xuat": [{"file": "b.xlsx"}], "sheet_nguon": [], "pass": 9, "fail": 2})
+    r = kit.build_report()
+    assert r["ket_luan"] == "KHÔNG ĐẠT" and any("M02" in x and "còn FAIL" in x for x in r["ly_do_fail"])
+
+
+def test_m02_detail_shows_dynamic_row_counts(kit):
+    _complete_run(kit)
+    r = kit.build_report()
+    assert r["ket_luan"] == "ĐẠT", r["ly_do_fail"] + r["ly_do_chua_du"]
+    m02 = next(x for x in r["nhom"][3]["rows"] if x["ma"] == "M02")
+    assert "'PL2.1' 26 dòng" in m02["chi_tiet"] and "30 PASS, 0 FAIL" in m02["chi_tiet"]
+
+
+def test_m02_manual_text_has_no_fixed_row_count(kit):
+    m02 = next(i for i in kit.manual_items() if i["ma"] == "M02")
+    assert not re.search(r"\b70\b", m02["thao_tac"] + m02["mong_doi"])
+    assert "M02_DOI_CHIEU_EXCEL.bat" in m02["thao_tac"] + m02["mong_doi"]
+
+
+def test_m02_command_without_files_is_not_tested(kit, monkeypatch):
+    monkeypatch.setattr(kit, "venv_modules", lambda: (True, "ok"))
+    kit.VPY.parent.mkdir(parents=True, exist_ok=True)
+    kit.VPY.write_text("")
+    log = kit.Log("M02")
+    assert kit.cmd_doi_chieu_excel(log, None, None) == 1
+    log.close()
+    assert "M02 CHƯA KIỂM THỬ" in log.path.read_text(encoding="utf-8")
+    assert not kit.M02_FILE.exists()
+
+
+# ---------------------------------------------------------------------------
+# M02: picking files at the prompt (bug report 19/11: valid .xlsx path rejected)
+# ---------------------------------------------------------------------------
+
+
+def _xlsx_file(path):
+    import openpyxl
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb = openpyxl.Workbook()
+    wb.active.append(["a"])
+    wb.save(path)
+    return path
+
+
+def _feed(monkeypatch, kit, answers):
+    it = iter(answers)
+    out = []
+
+    def fake_input(prompt=""):
+        a = next(it)
+        out.append(f"{prompt}{a}")
+        return a
+    monkeypatch.setattr("builtins.input", fake_input)
+    return out
+
+
+def test_m02_clean_input_and_split_paths(kit):
+    ci, sp = kit.clean_input, kit.split_paths
+    assert ci("\u202aE:\\Downloads\\a.xlsx\u200e ") == ("E:\\Downloads\\a.xlsx", ["U+200E", "U+202A"])
+    assert ci("& 'E:\\x y.xlsx'")[0] == "'E:\\x y.xlsx'"
+    w1, w2 = r"E:\Downloads\BaoCao_PhuLuc2_20261119_1623.xlsx", r"E:\Downloads\BaoCao_PhuLuc2_20261119_1624.xlsx"
+    assert sp(f"{w1} {w2}") == [w1, w2]
+    assert sp(f"{w1},{w2}") == [w1, w2] and sp(f"{w1}; {w2}") == [w1, w2]
+    assert sp(f'"{w1}" "{w2}"') == [w1, w2]
+    v = r"E:\1. Kỹ thuật\7. BCKT\Báo cáo tháng 2.xlsx"
+    assert sp(f'"{v}"') == [v] and sp(f"'{v}'") == [v]
+    assert sp(f"{v} E:\\Tải về\\b c.xlsx") == [v, r"E:\Tải về\b c.xlsx"]
+
+
+def test_m02_why_not_file_gives_specific_reasons(kit, tmp_path):
+    ok = _xlsx_file(tmp_path / "Tải về" / "BaoCao_Phụ lục 2_1623.xlsx")
+    src = tmp_path / "nguon.xls"
+    src.write_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 100)
+    fake = tmp_path / "gia.xlsx"
+    fake.write_text("không phải excel")
+    pdf = tmp_path / "BaoCao.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    w = kit.why_not_file
+    assert w(ok, (".xlsx",), src) is None
+    assert w(src, kit.SOURCE_EXT) is None
+    assert "file .xls/.csv là FILE NGUỒN" in w(src, (".xlsx",))
+    assert "định dạng .pdf" in w(pdf, (".xlsx",))
+    assert "không phải file Excel .xlsx" in w(fake, (".xlsx",))
+    assert "thư mục" in w(tmp_path, (".xlsx",))
+    assert "không tìm thấy file" in w(tmp_path / "Tải về" / "BaoCao_Phụ lục 2_9999.xlsx", (".xlsx",))
+    assert "gần giống" in w(tmp_path / "Tải về" / "BaoCao_Phụ lục 2_9999.xlsx", (".xlsx",))
+    assert "không tìm thấy thư mục" in w(tmp_path / "khong_co" / "a.xlsx", (".xlsx",))
+    assert "chính là file nguồn" in w(ok, (".xlsx",), ok)
+
+
+def test_m02_prompt_accepts_one_two_quoted_vietnamese_paths(kit, tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "khong_co"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    monkeypatch.setattr(kit.Path, "home", lambda: tmp_path / "user")
+    d = tmp_path / "E" / "1. Kỹ thuật" / "Tải về"
+    a = _xlsx_file(d / "BaoCao_PhuLuc2_20261119_1623.xlsx")
+    b = _xlsx_file(d / "BaoCao_PhuLuc2_20261119_1624.xlsx")
+    src = tmp_path / "E" / "1. Kỹ thuật" / "7. BCKT" / "Phu luc 2 Bang tong hop 2.2024.xls"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 100)
+    log = kit.Log("M02")
+    cases = [
+        ([str(a), ""], [a]),                                   # one path, typed
+        ([f'"{a}"', f'"{b}"', ""], [a, b]),                    # drag-and-drop, one per line (quoted)
+        ([f'"{a}" "{b}"', ""], [a, b]),                         # two quoted paths on one line
+        ([f"{a},{b}", ""], [a, b]),                             # comma separated
+        (["\u202a" + str(a), ""], [a]),                         # invisible char from copy/paste
+        ([f"& '{a}'", ""], [a]),                                # PowerShell drag-and-drop
+        ([str(d / "khong_co.xlsx"), str(src), str(a), str(a), ""], [a]),  # missing, source .xls, ok, duplicate
+    ]
+    for answers, expected in cases:
+        out = _feed(monkeypatch, kit, answers)
+        assert kit.ask_export_files(log, src) == expected, (answers, out)
+    log.close()
+
+
+def test_m02_prompt_numbers_from_real_download_folder(kit, tmp_path, monkeypatch):
+    """Edge downloads to another drive (E:\\Downloads): read it from Edge's Preferences."""
+    dl = tmp_path / "E" / "Downloads"
+    a = _xlsx_file(dl / "BaoCao_PhuLuc2_20261119_1623.xlsx")
+    time.sleep(0.02)
+    b = _xlsx_file(dl / "BaoCao_PhuLuc2_20261119_1624.xlsx")
+    prefs = tmp_path / "local" / "Microsoft" / "Edge" / "User Data" / "Default" / "Preferences"
+    prefs.parent.mkdir(parents=True)
+    prefs.write_text(json.dumps({"download": {"default_directory": str(dl)}}), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    assert kit.downloads_dirs()[0] == dl
+    log = kit.Log("M02")
+    _feed(monkeypatch, kit, ["9", "1,2", ""])
+    assert kit.ask_export_files(log, None) == [b, a]
+    _feed(monkeypatch, kit, ["2 1", ""])
+    assert kit.ask_export_files(log, None) == [a, b]
+    log.close()
+    text = log.path.read_text(encoding="utf-8")
+    assert "1. BaoCao_PhuLuc2_20261119_1624.xlsx" in text and str(dl) in text
+
+
+def test_m02_source_prompt_reasons(kit, tmp_path, monkeypatch, capsys):
+    src = tmp_path / "Phụ lục 2 đánh giá.xls"
+    src.write_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 100)
+    _feed(monkeypatch, kit, [str(tmp_path / "x.pdf"), f'"{src}" "{src}"', f'"{src}"'])
+    assert kit._ask_path("File nguồn: ") == src
+    out = capsys.readouterr().out
+    assert "không tìm thấy file" in out and "chỉ nhập MỘT file nguồn" in out and "Nhận file nguồn: Phụ lục 2 đánh giá.xls" in out
+    assert "Chuỗi đã nhập:" in out

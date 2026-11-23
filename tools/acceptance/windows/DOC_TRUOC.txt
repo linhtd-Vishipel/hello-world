@@ -1,0 +1,25 @@
+BO NGHIEM THU MICROSOFT EDGE - EXCEL DASHBOARD
+================================================
+
+Bam dup lan luot cac file sau, cho file truoc xong roi moi mo file sau:
+
+  01_KIEM_TRA_MOI_TRUONG.bat   Kiem tra Python 3.11+, Node.js 20+, Edge, o dia
+  02_TAO_DU_LIEU_MAU.bat       Tao 6 file Excel mau
+  03_CAI_DAT_THU_VIEN.bat      Cai thu vien, mo thu Microsoft Edge
+  04_KIEM_THU_EDGE.bat         42 bai kiem thu tu dong T01-T42 tren Edge
+  05_DOI_CHIEU_KET_QUA.bat     Doi chieu du lieu, kiem tra file PDF/Word/Excel
+  06_TONG_HOP_BAO_CAO.bat      Lam va nhap M01-M12, lap bao cao nghiem thu
+  M02_DOI_CHIEU_EXCEL.bat      Doi chieu file Excel xuat voi file Excel nguon bat ky - M02
+
+Ket qua, log, anh chup loi va bao cao: C:\nghiemthu\edge
+Bao cao: C:\nghiemthu\edge\BAO_CAO_NGHIEM_THU.html
+  -> File bao cao CHI CO sau khi chay xong buoc 06.
+  -> Mo lai ket qua bat ky luc nao: bam dup MO_THU_MUC_KET_QUA.bat
+
+Huong dan day du bang tieng Viet co dau:
+  docs\HUONG_DAN_NGHIEM_THU_EDGE_WINDOWS.md  (trong thu muc ma nguon)
+
+KHONG can cai Poppler va LibreOffice. Neu may co san, bo cong cu dung them de
+doi chieu cheo; neu khong co, cac muc do ghi SKIP (SKIP khong tinh la PASS).
+
+Khong chay truc tiep file _chung.bat.
