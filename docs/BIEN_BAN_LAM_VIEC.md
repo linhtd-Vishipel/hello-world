@@ -168,3 +168,31 @@ Kiểm thử (Linux, Chrome 153 thay cho Edge — chưa phải Windows):
 - Bước 05: 130 PASS, 0 FAIL, 36 SKIP; dữ liệu lớn 16/16 PASS.
 - **Chưa nghiệm thu trên Windows 10 + Edge**: thư mục lưu, hộp thoại lưu, Ctrl+J, mở bằng Excel/Adobe/Word.
 Dấu vân tay mới: **`ebc8d0d88b04` (38 file)**.
+
+---
+
+# Ngày 23/11/2026 — sau merge PR #10 (`main` = `b7ea2b8`, dấu vân tay `c997702c3786`)
+
+## Lỗi báo từ Windows: Excel lần 2, PDF, Word không xuất được
+File "Phụ lục 2 Bảng tổng hợp đánh giá chất lượng 10.2026.signed.xls", sheet TTXLTTHH, 20 dòng: Excel lần đầu được;
+Excel lần 2, PDF, Word không được. Chưa nhận được log hay thông báo lỗi từ máy Windows.
+
+Kiểm tra (Linux; Chrome thật có giao diện, điều khiển bằng CDP, bấm chuột thật, Chrome tự lưu file — không qua
+Playwright): với mã `main` chưa sửa và file .xls dạng Phụ lục 2 (20 dòng), **6/6 lượt xuất liên tiếp lưu được file**
+(Excel ×3 → PDF → Word → Excel). Cơ chế tải, nút xuất, trạng thái "đang xử lý" không hỏng sau lần đầu.
+
+Hai lỗi thật phụ thuộc dữ liệu — tái hiện được và đã sửa:
+1. **Word → HTTP 500** khi ô có ký tự điều khiển (thường có trong file .xls: `\x0b`, `\x07`, `\x01`…): python-docx
+   từ chối. Sửa: thay ký tự điều khiển bằng dấu cách khi ghi Word (`export.py`, `_xml_text`).
+2. **Excel/PDF/Word → HTTP 422** khi tiêu đề cột > 300 ký tự hoặc tên nhóm > 500 ký tự: trang hiện thông báo tiếng
+   Anh "String should have at most 300 characters". Sửa: giới hạn bằng độ dài tối đa một ô Excel (32.767);
+   lỗi 422 trả thông báo tiếng Việt, nêu đúng trường.
+
+Nguyên nhân trên máy Windows **chưa xác định** (không có log). Đã thêm log chẩn đoán: máy chủ ghi `[XUAT]` cho mỗi
+lần tạo file (sheet, số dòng, số biểu đồ/ảnh, dung lượng, thời gian), từ chối (422) kèm lý do, lỗi (500) kèm mã lỗi
+và traceback, mỗi lần tải; trình duyệt gửi về `/api/client-log`: bấm nút, kết quả, bắt đầu tải, bấm Tải lại, lỗi
+JavaScript, lần bấm bị bỏ qua vì đang xử lý. Log ở `C:\nghiemthu\edge\logs\may_chu_*.log` (dòng có `[XUAT]`).
+
+Kiểm thử (Linux): pytest 193/193 (Python 3.13, 3.11), thêm 5 bài — 4 bài FAIL với mã cũ, PASS với mã sửa; bài 8 lần
+xuất liên tiếp đạt ở cả hai. Chrome thật sau sửa: 8/8 lượt liên tiếp (.xls 20 dòng), 4/4 (tiêu đề cột dài).
+Dấu vân tay mới: **`e5ec07ea3165` (38 file)**. **Chưa kiểm thử trên Windows + Edge.**

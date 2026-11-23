@@ -730,6 +730,16 @@
   // A page cannot know whether the user saved, cancelled or opened the file, so
   // the status never claims the file is saved; the "Tải lại" link downloads the
   // very same file again (same server copy, valid for 1 hour).
+  /** Export diagnostics sent to the server log (logs\\may_chu_*.log): never blocks or breaks the page. */
+  function clog(event, detail) {
+    try {
+      fetch("/api/client-log", { method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+        body: JSON.stringify({ event, detail: String(detail || "").slice(0, 1900) }) }).catch(() => {});
+    } catch (_) {}
+  }
+  window.addEventListener("error", (e) => clog("js-error", `${e.message} @ ${e.filename}:${e.lineno}`));
+  window.addEventListener("unhandledrejection", (e) => clog("js-promise", e.reason && (e.reason.stack || e.reason.message || e.reason)));
+
   function clearManualLink() {
     $("exportLink").replaceChildren();
   }
@@ -739,8 +749,11 @@
     document.body.append(a);
     a.click();
     a.remove();
+    clog("download-start", `${name} ${url}`);
+    const again = el("a", { class: "btn small", id: "manualDownload", href: url, download: name }, `⬇ Tải lại ${name}`);
+    again.addEventListener("click", () => clog("download-again", `${name} ${url}`));
     $("exportLink").replaceChildren(
-      el("a", { class: "btn small", id: "manualDownload", href: url, download: name }, `⬇ Tải lại ${name}`),
+      again,
       el("span", { class: "muted" }, " Dùng nút này nếu trình duyệt chặn tải tự động, nếu đã bấm Huỷ ở hộp thoại lưu, hoặc không thấy file trong danh sách tải xuống (Ctrl+J). File giữ trên máy chủ 1 giờ."));
   }
 
@@ -782,10 +795,15 @@
   }
 
   async function exportReport(fmt, opts = {}) {
-    if (!state.current || state.exporting) return;
+    if (!state.current || state.exporting) {
+      clog("export-ignored", `${fmt}: ${!state.current ? "chưa chọn bộ dữ liệu" : "đang xử lý lần xuất trước"}`);
+      if (state.exporting) toast("Đang tạo file trước, chờ xong rồi bấm lại.");
+      return;
+    }
     const t0 = performance.now();
     setBusy(true, fmt);
     setStatus(`Đang tạo file ${FMT_LABEL[fmt]}…`, "busy");
+    clog("export-click", `${fmt} sheet=${sheet().name} rows=${state.viewIdx.length}/${sheet().rows.length} ${navigator.userAgent}`);
     try {
       const { url, name, size, rows } = await requestReport(fmt, opts);
       startDownload(url, name);
@@ -794,7 +812,9 @@
         "Đã chuyển cho trình duyệt tải xuống — lưu theo thư mục/hộp thoại lưu của trình duyệt; xem trạng thái bằng Ctrl+J.";
       setStatus(msg, "ok");
       toast(`Đã tạo ${name} — trình duyệt đang tải xuống`);
+      clog("export-ok", `${fmt} ${name} ${size} bytes ${secs}s`);
     } catch (e) {
+      clog("export-fail", `${fmt}: ${e.stack || e.message}`);
       clearManualLink();
       setStatus(`❌ Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`, "error");
       toast(`Xuất ${FMT_LABEL[fmt]} thất bại: ${e.message}`);

@@ -7,14 +7,20 @@ their own charts, which are saved per dataset and shared with everyone.
 
 Run:  uvicorn excel_dashboard.main:app --host 0.0.0.0 --port 8000
 """
+import logging
 import os
+import sys
+import time
+import traceback
+import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -25,6 +31,29 @@ MAX_UPLOAD_BYTES = int(os.environ.get("EXCEL_DASHBOARD_MAX_MB", "20")) * 1024 * 
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Excel Dashboard")
+
+# Export diagnostics: one line per export step (also browser-side events sent to
+# /api/client-log), written to stderr so it lands in the server log file.
+log = logging.getLogger("excel_dashboard.export")
+if not log.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(logging.Formatter("%(asctime)s [XUAT] %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    """Readable Vietnamese message instead of pydantic's English list (which the page showed as-is)."""
+    parts = []
+    for e in exc.errors()[:3]:
+        where = ".".join(str(x) for x in e.get("loc", []) if x != "body")
+        parts.append(f"{where}: {e.get('msg')}")
+    detail = "Dữ liệu gửi lên máy chủ không hợp lệ (" + "; ".join(parts) + "). Hãy bấm Làm mới dữ liệu rồi thử lại."
+    if "/export/" in request.url.path:
+        log.warning("422 %s %s", request.url.path, detail)
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 class ChartSpec(BaseModel):
@@ -109,12 +138,24 @@ def _build_export(dataset_id: str, fmt: str, req: export.ExportRequest):
         sheets = storage.get_sheets(dataset_id)
     except KeyError:
         raise _not_found()
+    t0 = time.time()
+    where = (f"dataset={dataset_id} fmt={fmt} sheet={req.sheet!r} scope={req.scope} "
+             f"rows_selected={'all' if req.row_indices is None else len(req.row_indices)} charts={len(req.charts)} "
+             f"images={sum(1 for c in req.charts if c.image)}")
     try:
         report = export.build_report(meta, sheets, req, fmt)
     except export.ExportError as exc:
+        log.warning("TU CHOI %s: %s", where, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    content = export.BUILDERS[fmt](report)
+    try:
+        content = export.BUILDERS[fmt](report)
+    except Exception as exc:  # noqa: BLE001 — report the real cause instead of an opaque HTTP 500
+        code = uuid.uuid4().hex[:8]
+        log.error("LOI %s ma=%s: %s\n%s", where, code, exc, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ khi tạo file {fmt.upper()} (mã lỗi {code}): "
+                                                     f"{type(exc).__name__}: {exc}. Xem log máy chủ.") from exc
     filename = export.report_filename(meta["title"], fmt, report.generated_at)
+    log.info("TAO %s rows=%s size=%s file=%s %.2fs", where, report.row_count, len(content), filename, time.time() - t0)
     return content, filename, report.row_count
 
 
@@ -153,6 +194,7 @@ def prepare_export(dataset_id: str, fmt: Literal["xlsx", "pdf", "docx"], req: ex
     download settings (download folder, "ask where to save", Ctrl+J list)."""
     content, filename, rows = _build_export(dataset_id, fmt, req)
     token = downloads.put(content, fmt, filename, rows)
+    log.info("SAN SANG token=%s… file=%s", token[:8], filename)
     return {"token": token, "url": f"/api/exports/{token}", "filename": filename, "size": len(content), "rows": rows,
             "expires_in": downloads.TTL_SECONDS}
 
@@ -161,8 +203,23 @@ def prepare_export(dataset_id: str, fmt: Literal["xlsx", "pdf", "docx"], req: ex
 def get_export(token: str, inline: bool = Query(False, description="PDF preview inside the page")):
     item = downloads.get(token)
     if item is None:
+        log.warning("TAI token=%s… KHONG CO (het han hoac sai)", token[:8])
         raise HTTPException(status_code=404, detail="File báo cáo đã hết hạn hoặc không tồn tại. Hãy bấm Xuất lại.")
+    log.info("TAI token=%s… file=%s size=%s%s", token[:8], item["filename"], len(item["content"]), " (xem truoc)" if inline else "")
     return _file_response(item["content"], item["fmt"], item["filename"], item["rows"], inline)
+
+
+class ClientLog(BaseModel):
+    event: str = Field(..., max_length=100)
+    detail: str = Field("", max_length=2000)
+
+
+@app.post("/api/client-log", status_code=204)
+def client_log(entry: ClientLog):
+    """Browser-side export events (click, server answer, download started, JS errors), so the
+    server log shows what happened in the user's browser too."""
+    log.info("TRINH DUYET %s %s", entry.event, entry.detail.replace("\n", " ")[:2000])
+    return Response(status_code=204)
 
 
 @app.delete("/api/datasets/{dataset_id}", status_code=204)

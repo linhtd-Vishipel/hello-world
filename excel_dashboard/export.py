@@ -49,34 +49,40 @@ class ExportError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+# Text taken from the source workbook (column names, category values, chart titles built
+# from them) can be as long as an Excel cell: 32,767 characters. Real reports often have
+# long, multi-line headers; a smaller limit rejected the whole export with HTTP 422.
+TEXT_MAX = 32767
+
+
 class FilterItem(BaseModel):
-    label: str = Field(..., max_length=300)
-    value: str = Field(..., max_length=500)
+    label: str = Field(..., max_length=TEXT_MAX)
+    value: str = Field(..., max_length=TEXT_MAX)
 
 
 class KpiItem(BaseModel):
-    label: str = Field(..., max_length=300)
+    label: str = Field(..., max_length=TEXT_MAX)
     value: Optional[float] = None
-    sub: str = Field("", max_length=300)
-    column: Optional[str] = Field(None, max_length=300)
+    sub: str = Field("", max_length=TEXT_MAX)
+    column: Optional[str] = Field(None, max_length=TEXT_MAX)
     mode: Literal["count", "sum", "avg"]
 
 
 class GroupItem(BaseModel):
-    label: str = Field(..., max_length=500)
+    label: str = Field(..., max_length=TEXT_MAX)
     value: Optional[float] = None
     other: bool = False
 
 
 class ChartItem(BaseModel):
     id: str = Field(..., max_length=64)
-    title: str = Field(..., max_length=300)
+    title: str = Field(..., max_length=TEXT_MAX)
     type: Literal["bar", "hbar", "line", "doughnut", "hist"]
-    dimension: str = Field(..., max_length=300)
-    measure: Optional[str] = Field(None, max_length=300)
+    dimension: str = Field(..., max_length=TEXT_MAX)
+    measure: Optional[str] = Field(None, max_length=TEXT_MAX)
     agg: Literal["sum", "avg", "count", "min", "max"]
-    dimension_label: str = Field(..., max_length=300)
-    value_label: str = Field(..., max_length=300)
+    dimension_label: str = Field(..., max_length=TEXT_MAX)
+    value_label: str = Field(..., max_length=TEXT_MAX)
     groups: list[GroupItem] = Field(default_factory=list, max_length=5000)
     image: Optional[str] = None  # data:image/png;base64,...
 
@@ -88,8 +94,8 @@ class Sections(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    sheet: str = Field(..., max_length=300)
-    author: str = Field("", max_length=100)
+    sheet: str = Field(..., max_length=TEXT_MAX)
+    author: str = Field("", max_length=200)
     scope: Literal["current", "all_sheets"] = "current"
     sections: Sections = Field(default_factory=Sections)
     # Indices into the stored sheet rows, in display order. None = all rows.
@@ -856,6 +862,15 @@ def to_pdf(rep: Report) -> bytes:
 # ---------------------------------------------------------------------------
 
 
+_XML_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xml_text(s) -> str:
+    """Text for Word: XML 1.0 forbids most control characters (often present in cells of .xls files,
+    e.g. vertical tab from Alt+Enter in old Excel); python-docx raises ValueError on them."""
+    return _XML_ILLEGAL.sub(" ", "" if s is None else str(s))
+
+
 def to_docx(rep: Report) -> bytes:
     from docx import Document
     from docx.enum.section import WD_ORIENT
@@ -897,7 +912,7 @@ def to_docx(rep: Report) -> bytes:
         cell.text = ""
         p = cell.paragraphs[0]
         p.paragraph_format.space_after = Pt(0)
-        run = p.add_run(text)
+        run = p.add_run(_xml_text(text))
         run.font.size = Pt(size)
         run.bold = bold
         if color:
@@ -957,13 +972,13 @@ def to_docx(rep: Report) -> bytes:
 
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run(f"BÁO CÁO {rep.title.upper()}")
+    run = title.add_run(_xml_text(f"BÁO CÁO {rep.title.upper()}"))
     run.bold = True
     run.font.size = Pt(18)
     run.font.color.rgb = RGBColor.from_string(ACCENT)
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = sub.add_run(f"Sheet: {rep.sheet_name} · Lập lúc {rep.generated_at:%H:%M} ngày {rep.generated_at:%d/%m/%Y}")
+    r = sub.add_run(_xml_text(f"Sheet: {rep.sheet_name}") + f" · Lập lúc {rep.generated_at:%H:%M} ngày {rep.generated_at:%d/%m/%Y}")
     r.italic = True
     r.font.color.rgb = RGBColor.from_string("52514E")
 
@@ -988,7 +1003,7 @@ def to_docx(rep: Report) -> bytes:
     if rep.sections.stats and rep.charts:
         heading("Biểu đồ và bảng thống kê")
         for n, ch in enumerate(rep.charts, start=1):
-            doc.add_heading(f"{sec}.{n}. {ch.title}", level=2)
+            doc.add_heading(_xml_text(f"{sec}.{n}. {ch.title}"), level=2)
             raw = _decode_image(ch.image)
             if raw:
                 doc.add_picture(io.BytesIO(raw), width=content_w)
@@ -1046,7 +1061,7 @@ def to_docx(rep: Report) -> bytes:
                     doc.add_page_break()
                 names = ", ".join(cols[i]["name"] for i in chunk[1 if ci else 0:])
                 note = doc.add_paragraph()
-                r_ = note.add_run(f"Phần {ci + 1}/{len(chunks)} — các cột: {names}")
+                r_ = note.add_run(_xml_text(f"Phần {ci + 1}/{len(chunks)} — các cột: {names}"))
                 r_.italic = True
                 r_.font.size = Pt(8)
             widths = [natural[i] for i in chunk]
@@ -1058,7 +1073,7 @@ def to_docx(rep: Report) -> bytes:
 
     for s in doc.sections:
         fp = s.footer.paragraphs[0]
-        fp.text = f"{rep.title} · Lập lúc {rep.generated_at:%d/%m/%Y %H:%M}"
+        fp.text = _xml_text(rep.title) + f" · Lập lúc {rep.generated_at:%d/%m/%Y %H:%M}"
         fp.runs[0].font.size = Pt(8)
         fp.runs[0].font.color.rgb = RGBColor.from_string("52514E")
 

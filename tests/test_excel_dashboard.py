@@ -2,6 +2,7 @@ import io
 from pathlib import Path
 from datetime import datetime
 
+import docx
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient
@@ -436,3 +437,101 @@ def test_page_uses_http_downloads_not_blob_urls():
     js = (Path(__file__).resolve().parents[1] / "excel_dashboard" / "static" / "app.js").read_text(encoding="utf-8")
     assert "createObjectURL" not in js and "/prepare`" in js
     assert "thành công: ${name}" not in js  # no "saved" claim: the page cannot know what the user chose
+
+
+# ---------------------------------------------------------------------------
+# Windows acceptance 23/11 (Phụ lục 2 … 10.2026.signed.xls): exports after the first one failed
+# ---------------------------------------------------------------------------
+
+
+def _upload_rows(client, header, rows, name="pl2.csv"):
+    import csv as _csv
+
+    buf = io.StringIO()
+    w = _csv.writer(buf, delimiter=";")
+    w.writerow(header)
+    w.writerows(rows)
+    res = client.post("/api/datasets", files={"file": (name, buf.getvalue().encode("utf-8"))}, data={"title": "Phụ lục 2 Bảng tổng hợp 10.2026"})
+    assert res.status_code == 201, res.text
+    ds = res.json()["id"]
+    return ds, client.get(f"/api/datasets/{ds}").json()["sheets"][0]
+
+
+def _get_all(client, ds, body, formats):
+    out = []
+    for fmt in formats:
+        prep = client.post(f"/api/datasets/{ds}/export/{fmt}/prepare", json=body)
+        assert prep.status_code == 200, (fmt, prep.status_code, prep.text[:300])
+        f = client.get(prep.json()["url"])
+        assert f.status_code == 200 and len(f.content) == prep.json()["size"] > 0
+        out.append((fmt, prep.json()["token"], f.content))
+    return out
+
+
+def test_word_export_with_control_characters_from_xls(client):
+    """Cells of old .xls files can hold control characters (vertical tab, bell...); python-docx
+    refused them and the Word export answered HTTP 500."""
+    ds, sh = _upload_rows(client, ["STT", "Nội dung", "Ghi chú", "Điểm"],
+                          [[1, "Chỉ tiêu 1", "Dòng\x0bxuống", 8], [2, "Chỉ tiêu 2", "\x07bell & <b>", 9], [3, "Chỉ tiêu\x01 3", "ok", 7]])
+    files = _get_all(client, ds, {"sheet": sh["name"]}, ["docx", "pdf", "xlsx"])
+    d = docx.Document(io.BytesIO(files[0][2]))
+    cells = [c.text for t in d.tables for r in t.rows for c in r.cells]
+    assert "Dòng xuống" in cells and "Chỉ tiêu  3" in cells  # control character -> space, text kept
+
+
+def test_long_headers_and_labels_do_not_block_any_format(client):
+    """Real report headers are long; a 300/500-character limit rejected Excel, PDF and Word (HTTP 422)."""
+    long_h = ("Tỷ lệ phần trăm số bản tin an toàn hàng hải MSI được phát đúng giờ theo kế hoạch trên các kênh "
+              "MF/HF/VHF/DSC/NAVTEX ") * 3
+    long_v = "Đài thông tin duyên hải Cà Mau — " + "đạt yêu cầu về thời gian, nội dung và chất lượng âm thanh; " * 10
+    rows = [[i, 90 + i % 5, long_v if i % 2 else "Đài B", 8] for i in range(1, 21)]
+    ds, sh = _upload_rows(client, ["STT", long_h, "Đơn vị", "Điểm"], rows)
+    meas = sh["columns"][1]["name"]
+    assert len(meas) > 300 and len(long_v) > 500
+    total_a = sum(r[1] for r in rows if r[2] == long_v)
+    chart = {"id": "a", "title": f"Tổng {meas} theo Đơn vị", "type": "hbar", "dimension": "Đơn vị", "measure": meas, "agg": "sum",
+             "dimension_label": "Đơn vị", "value_label": f"Tổng {meas}",
+             "groups": [{"label": long_v, "value": total_a}, {"label": "Đài B", "value": sum(r[1] for r in rows) - total_a}]}
+    kpi = {"label": f"Tổng {meas}", "value": sum(r[1] for r in rows), "mode": "sum", "column": meas}
+    files = _get_all(client, ds, {"sheet": sh["name"], "charts": [chart], "kpis": [kpi]}, ["xlsx", "pdf", "docx"])
+    wb = openpyxl.load_workbook(io.BytesIO(files[0][2]))
+    assert wb.sheetnames[0] == "Tổng quan" and len(wb.sheetnames[1]) <= 31 and wb["Dữ liệu chi tiết"].max_row == 4 + 20
+
+
+def test_consecutive_exports_each_give_their_own_file(client):
+    """Excel x3 -> PDF -> Word -> Excel: every export answers 200, gets its own token, and 'Tải lại'
+    (a second GET of the same token) returns that export's bytes, not another one's."""
+    ds = _upload(client)
+    seq = ["xlsx", "xlsx", "xlsx", "pdf", "docx", "xlsx", "pdf", "docx"]
+    files = _get_all(client, ds, _payload(), seq)
+    assert len({t for _, t, _ in files}) == len(seq)
+    for fmt, token, content in files:
+        again = client.get(f"/api/exports/{token}")
+        assert again.content == content and again.headers["content-disposition"].endswith(f".{fmt}")
+    assert files[3][2].startswith(b"%PDF") and files[4][2].startswith(b"PK") and files[0][2].startswith(b"PK")
+
+
+def test_validation_errors_are_vietnamese_and_name_the_field(client):
+    ds = _upload(client)
+    bad = client.post(f"/api/datasets/{ds}/export/pdf/prepare", json={"sheet": "Doanh thu", "scope": "khong-co"})
+    assert bad.status_code == 422
+    detail = bad.json()["detail"]
+    assert isinstance(detail, str) and detail.startswith("Dữ liệu gửi lên máy chủ không hợp lệ") and "scope" in detail
+
+
+def test_client_log_endpoint_and_export_log_lines(client, caplog):
+    import logging
+
+    log = logging.getLogger("excel_dashboard.export")
+    log.propagate = True
+    try:
+        with caplog.at_level(logging.INFO, logger="excel_dashboard.export"):
+            assert client.post("/api/client-log", json={"event": "export-click", "detail": "xlsx sheet=TTXLTTHH"}).status_code == 204
+            ds = _upload(client)
+            tok = client.post(f"/api/datasets/{ds}/export/docx/prepare", json=_payload()).json()["token"]
+            client.get(f"/api/exports/{tok}")
+    finally:
+        log.propagate = False
+    text = caplog.text
+    assert "TRINH DUYET export-click xlsx sheet=TTXLTTHH" in text and "TAO dataset=" in text and "fmt=docx" in text
+    assert f"TAI token={tok[:8]}" in text

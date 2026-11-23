@@ -9,7 +9,7 @@ môi trường ảo `C:\nghiemthu\cong_cu\venv`, dữ liệu mẫu và kết qu�
 py -3 "C:\Nghiệm thu_mới\tools\acceptance\nghiemthu.py" kiem-tra
 ```
 
-Sau khi tải lại mã nguồn (bước 1), dòng cuối báo cáo bước 06 phải in dấu vân tay **`c997702c3786`**.
+Sau khi tải lại mã nguồn (bước 1), dòng cuối báo cáo bước 06 phải in dấu vân tay **`e5ec07ea3165`**.
 Kiểm tra nhanh bản mã nguồn: thư mục `tools\acceptance\windows\` phải có file `M02_DOI_CHIEU_EXCEL.bat`.
 
 ## Thứ tự công việc
@@ -59,21 +59,21 @@ Compress-Archive -Force -DestinationPath C:\nghiemthu\bao_cao_gon.zip -Path `
 | G2 | 0 FAIL, 0 CHƯA KIỂM THỬ (SKIP ghi riêng) | `fail = 0`, `chua = 0`, `skip` |
 | G3 | Microsoft Edge kênh msedge | `trinh_duyet.launch.channel = "msedge"` |
 | G4 | Windows 10/11, không lỗi môi trường | `he_dieu_hanh`, `loi_moi_truong = []` |
-| G5 | Đúng bản bàn giao | `dau_van_tay` bắt đầu bằng `c997702c3786` |
+| G5 | Đúng bản bàn giao | `dau_van_tay` bắt đầu bằng `e5ec07ea3165` |
 | G6 | M01–M05 PASS (M02 kèm đối chiếu tự động 0 FAIL) | nhóm D |
 
 ### 5. Đối chiếu dấu vân tay mã nguồn
 Phía phát triển (máy có mã nguồn):
 ```bash
 cd tools/acceptance && python3 -c "import nghiemthu as n; print(n.source_fingerprint())"
-# mong đợi: ('c997702c3786', 38)
+# mong đợi: ('e5ec07ea3165', 38)
 ```
 So với mục "Dấu vân tay mã nguồn" trong `BAO_CAO_NGHIEM_THU.md` từ Windows.
 
 ### 6. Kiểm tra CI và Pull Request #10
 - https://github.com/linhtd-Vishipel/hello-world/pull/10 — check `test` phải đạt trên commit mới nhất, không xung đột.
 - Phía phát triển: `git fetch origin && git diff --stat origin/main...origin/claude/excel-upload-dashboard-app-xfssug`
-- Kiểm thử cục bộ như CI: `python -m pytest -q` (mong đợi 188 passed).
+- Kiểm thử cục bộ như CI: `python -m pytest -q` (mong đợi 193 passed).
 
 ### 7. Merge
 **Chỉ merge PR #10 vào `main` khi G1–G6 đạt, CI đạt, không xung đột, và người có thẩm quyền đồng ý (G7–G8).**
